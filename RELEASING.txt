@@ -1,0 +1,26 @@
+HOW TO RELEASE AN UPDATE OF BACNET INSPECTOR
+============================================
+
+One-time setup
+--------------
+1. Make a PUBLIC repository on github.com (it can be empty; only release files go there).
+   It must be public, or the app cannot download the update without a login.
+2. Put its address in update_url.txt, like this (one line):
+     https://github.com/NAME/REPO/releases/latest/download/update.json
+   Do not change this after you have sent the app out: every installed copy looks there.
+
+Every release
+-------------
+1. Raise the number in version.txt (for example 1.2.1 -> 1.2.2). Installed copies only
+   update when this number is higher than theirs.
+2. Write what changed in release_notes.txt. Users see it in the update window.
+3. Run build_windows.bat, then build_installer.bat.
+   You get installer\BACnet-Inspector-Setup-<version>.exe and installer\update.json.
+4. On GitHub: your repository -> Releases -> "Draft a new release".
+   - Tag: v<version>   (exactly, for example v1.2.2; the v matters)
+   - Attach BOTH files: the Setup .exe and update.json.
+   - Leave "Set as the latest release" ticked, then Publish.
+5. Done. Installed copies see the update the next time they start (or Help -> Check for updates).
+
+New employees can download the Setup .exe from the release page:
+  https://github.com/NAME/REPO/releases/latest

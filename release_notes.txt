@@ -1,0 +1,2 @@
+- The app now updates itself: you will be told when a new version is available.
+- Fixed "bacnet_inspector.html must be in the same folder" error.

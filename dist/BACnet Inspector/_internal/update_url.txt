@@ -1,0 +1,1 @@
+https://github.com/testname/testrepo/releases/latest/download/update.json
