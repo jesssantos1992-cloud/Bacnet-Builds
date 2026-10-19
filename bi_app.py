@@ -1092,6 +1092,10 @@ class MainWindow(QMainWindow):
             self.m_run.setText('Stop capture' if self.run else 'Start capture')
             refresh(m)
         m.aboutToShow.connect(cap_menu)
+        m = mb.addMenu('&Tools')
+        act(m, 'PuTTY (SSH, Telnet, serial terminal)', self.open_putty)
+        act(m, 'PuTTY help', lambda: self.open_putty_file('putty.chm'))
+        act(m, 'PuTTY licence', lambda: self.open_putty_file('LICENCE'))
         m = mb.addMenu('&Help')
         act(m, 'Getting started', lambda: self.help('start'), 'F1')
         act(m, 'Display filter reference', lambda: self.help('filter'))
@@ -1988,6 +1992,44 @@ class MainWindow(QMainWindow):
         self.explorer.on = False
         self.store.flush()
         e.accept()
+
+    # ----------------------------------------------------------------- PuTTY --
+    @staticmethod
+    def putty_dir():
+        """Folder holding the PuTTY that ships with the app (or the one in this project when run from source)."""
+        for d in (os.path.join(BL.BASE, 'putty'), os.path.join(BL.HERE, 'tools', 'putty')):
+            if os.path.isfile(os.path.join(d, 'putty.exe')):
+                return d
+        return None
+
+    def open_putty(self):
+        d = self.putty_dir()
+        exe = os.path.join(d, 'putty.exe') if d else None
+        if not exe:
+            for p in (os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'), 'PuTTY', 'putty.exe'),):
+                if os.path.isfile(p):
+                    exe = p
+        if not exe:
+            return self.toast('PuTTY is not included in this copy of BACnet Inspector')
+        s = self.live.cur()
+        if self.run and s and s.get('backend') == 'serial':
+            self.toast(f"Note: {s['id']} is in use by the live capture \u2013 stop it before opening that port in PuTTY")
+        import subprocess
+        try:
+            subprocess.Popen([exe], close_fds=True, creationflags=0x00000008)      # DETACHED_PROCESS
+        except OSError as e:
+            self.toast(f'Could not start PuTTY: {e.strerror}')
+
+    def open_putty_file(self, name):
+        d = self.putty_dir()
+        p = os.path.join(d, name) if d else ''
+        if not os.path.isfile(p):
+            return self.toast('PuTTY is not included in this copy of BACnet Inspector')
+        if name == 'LICENCE':
+            with open(p, encoding='utf-8', errors='replace') as f:
+                QMessageBox.information(self, 'PuTTY licence', 'PuTTY is included with BACnet Inspector under this licence:\n\n' + f.read())
+        else:
+            os.startfile(p)
 
     # ------------------------------------------------------------------ misc --
     def toast(self, m):
