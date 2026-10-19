@@ -1,23 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = [('bacnet_inspector.html', '.'), ('version.txt', '.'), ('update_url.txt', '.')]
-binaries = []
-hiddenimports = ['serial.tools.list_ports', 'serial.tools.list_ports_windows', 'serial.win32']
-tmp_ret = collect_all('webview')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['bacnet_live.py'],
+    ['bi_app.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[('bacnet_inspector.ico', '.'), ('version.txt', '.'), ('update_url.txt', '.')],
+    hiddenimports=['serial.tools.list_ports', 'serial.tools.list_ports_windows', 'serial.win32'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['webview', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtQml', 'PySide6.QtQuick', 'tkinter'],
     noarchive=False,
     optimize=0,
 )

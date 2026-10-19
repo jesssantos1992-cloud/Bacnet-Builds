@@ -1,1 +1,1 @@
-https://github.com/testname/testrepo/releases/latest/download/update.json
+https://github.com/YOUR-NAME/YOUR-REPO/releases/latest/download/update.json
