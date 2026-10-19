@@ -10,17 +10,17 @@ import math
 import re
 import time
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame,
                                QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSizePolicy, QTextBrowser, QToolButton, QTreeWidget,
+                               QPushButton, QScrollArea, QTextBrowser, QToolButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
-from bi_common import (CellGrid, Page, Pill, Table, colors, colors_light, csv_text, doc, esc, heading, html_table,
-                       is_dark, label, qa, sev_color, stamp, summary_row)
+from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, colors_light, csv_text, doc, esc, heading, html_table, is_dark,
+                       label, stamp, summary_row)
 
 VN = C.VN
 
@@ -231,6 +231,7 @@ class DevicesView(BaseView):
         self.tree.setHeaderLabels(self.COLS)
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(True)
+        self.tree.setItemDelegate(HighlightDelegate(self.tree))
         self.tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.tree.setColumnWidth(0, 320)
         for i, w in enumerate([200, 220, 180, 140, 100], 1):
@@ -269,6 +270,7 @@ class DevicesView(BaseView):
         while self.top.count():
             w = self.top.takeAt(0).widget()
             if w:
+                w.setParent(None)                   # hide it now, not when Qt gets round to deleting it
                 w.deleteLater()
         ng = len(T)
         nn = sum(len(x) for x in T.values())
@@ -443,7 +445,7 @@ class ChangesView(BaseView):
         WF = self.wf.currentData()
         WQ = self.wq.text().lower()
         R = [w for w in L if WF == 'all' or (WF == 'w' and w['sev'] == 0) or (WF == 'c' and w['sev'] >= 1) or
-             (WF == 'r' and re.match(r'^(error|reject|abort)', w['res']))]
+             (WF == 'r' and re.match(r'^(failed|rejected|cancelled)', w['res']))]
         if WQ:
             R = [w for w in R if WQ in f"{w['from']} {w['to']} {w['obj']} {w['prop']} {w['val']} {w['svc']}".lower()]
         return R
@@ -454,9 +456,10 @@ class ChangesView(BaseView):
         while self.top.count():
             w = self.top.takeAt(0).widget()
             if w:
+                w.setParent(None)                   # hide it now, not when Qt gets round to deleting it
                 w.deleteLater()
         cmd = sum(1 for w in L if w['sev'] >= 1)
-        rf = sum(1 for w in L if re.match(r'^(error|reject|abort)', w['res']))
+        rf = sum(1 for w in L if re.match(r'^(failed|rejected|cancelled)', w['res']))
         pills = []
         if L:
             pills.append((C.pl(len(L), 'request'), 'NOTE'))
@@ -470,7 +473,7 @@ class ChangesView(BaseView):
         R = self.rows()
         rows, data = [], []
         for w in R[:3000]:
-            bad = re.match(r'^(error|reject|abort)', w['res'])
+            bad = re.match(r'^(failed|rejected|cancelled)', w['res'])
             res = w['res'] or 'no answer seen'
             rows.append([rel(win, w['t']), who(win, w['from'], km), who(win, w['to'], km), w['svc'], (w['obj'] + ' ' + w['prop']).strip(),
                          (w['val'], {'bold': True}) if w['sev'] else w['val'], '' if w['pri'] is None else w['pri'],

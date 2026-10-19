@@ -1,2 +1,4 @@
-- The app now updates itself: you will be told when a new version is available.
-- Fixed "bacnet_inspector.html must be in the same folder" error.
+- Discover: new Back and Discover home buttons, plus a clickable path (Network > Device > Category > Point).
+- The mouse Back button and Alt+Left go back too.
+- IP addresses, MS/TP MACs, network numbers and device IDs are highlighted again in the packet list, packet details, tables and the Devices tree.
+- Fixed: text could briefly draw on top of itself when a page updated.

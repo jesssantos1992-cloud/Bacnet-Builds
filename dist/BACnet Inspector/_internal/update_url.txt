@@ -1,1 +1,0 @@
-https://github.com/YOUR-NAME/YOUR-REPO/releases/latest/download/update.json

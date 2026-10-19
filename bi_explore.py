@@ -425,17 +425,12 @@ class Explorer:
                 return fin({'err': 'the answer was too long for one message (segmented)', 'seg': 1})
             fin({'d': d, 'L': L, 'k': i + 3})
         elif t == 5:
-            k = i + 3
-            a = C.tg(d, k)
-            c1 = C.num(d[a.v:a.v + a.len])
-            k = a.v + a.len
-            a = C.tg(d, k)
-            c2 = C.num(d[a.v:a.v + a.len])
-            fin({'err': f"{C.EC.get(c1) or 'class ' + str(c1)}: {C.ECD.get(c2) or 'code ' + str(c2)}", 'code': c2})
+            c1, c2 = C.error_codes(d, i + 3, L)
+            fin({'err': C.error_text(c1, c2), 'code': c2})
         elif t == 6:
-            fin({'err': 'rejected: ' + str(C.RR.get(d[i + 2]) or d[i + 2]), 'rej': 1})
+            fin({'err': 'rejected: ' + (C.RR.get(d[i + 2]) or 'no reason given'), 'rej': 1})
         elif t == 7:
-            fin({'err': 'aborted: ' + str(C.AR.get(d[i + 2]) or d[i + 2]), 'abort': 1})
+            fin({'err': 'cancelled: ' + (C.AR.get(d[i + 2]) or 'no reason given'), 'abort': 1})
 
     def req(self, dev, apdu, tmo=3.0, tries=2):
         """Send one confirmed request and wait for its answer: {'d','L','k'} / {'ok'} / {'err'} / {'to'}."""

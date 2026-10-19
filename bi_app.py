@@ -11,21 +11,22 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import (QAbstractTableModel, QByteArray, QModelIndex, QObject, QSize, Qt, QThread, QTimer, Signal)
+from PySide6.QtCore import (QAbstractTableModel, QByteArray, QEvent, QModelIndex, QObject, QSize, Qt, QThread, QTimer,
+                            Signal)
 from PySide6.QtGui import (QAction, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap,
                            QShortcut)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
-                               QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
-                               QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
-                               QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter, QStackedWidget,
-                               QStyle, QSystemTrayIcon, QTabBar, QTableView, QTextBrowser, QToolBar, QToolButton,
-                               QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
+                               QPlainTextEdit, QPushButton, QSizePolicy, QSplitter, QStackedWidget, QSystemTrayIcon,
+                               QTabBar, QTableView, QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem,
+                               QVBoxLayout, QWidget)
 
 import bacnet_live as BL
 import bi_core as C
-from bi_common import Labels, colors, csv_text, doc, esc, html_table, is_dark, label, stamp
+from bi_common import HighlightDelegate, Labels, colors, csv_text, doc, esc, html_table, is_dark, label, stamp
 from bi_store import Store
 
 APP_NAME = 'BACnet Inspector'
@@ -69,9 +70,9 @@ class Loader(QThread):
     finished_ok = Signal(object)
     failed = Signal(object, str)
 
-    def __init__(self, tab, data, local_net):
+    def __init__(self, tab, data, local_net, own_ips=()):
         super().__init__()
-        self.tab, self.data, self.local_net = tab, data, local_net
+        self.tab, self.data, self.local_net, self.own_ips = tab, data, local_net, own_ips
 
     def run(self):
         t = self.tab
@@ -95,7 +96,7 @@ class Loader(QThread):
         t.P = P
         t.sz = N
         self.progress.emit(t, 'analysing…')
-        t.FD = C.analyze(P, t.T0, self.local_net)
+        t.FD = C.analyze(P, t.T0, self.local_net, self.own_ips)
         self.finished_ok.emit(t)
 
 
@@ -103,12 +104,12 @@ class Analyser(QThread):
     """Re-runs the analysis for the live capture in the background."""
     done = Signal(object, object)
 
-    def __init__(self, tab, P, T0, local_net):
+    def __init__(self, tab, P, T0, local_net, own_ips=()):
         super().__init__()
-        self.tab, self.P, self.T0, self.local_net = tab, P, T0, local_net
+        self.tab, self.P, self.T0, self.local_net, self.own_ips = tab, P, T0, local_net, own_ips
 
     def run(self):
-        self.done.emit(self.tab, C.analyze(self.P, self.T0, self.local_net))
+        self.done.emit(self.tab, C.analyze(self.P, self.T0, self.local_net, self.own_ips))
 
 
 # ============================================================ packet list --
@@ -275,13 +276,17 @@ class PacketsPane(QWidget):
         hh.setSectionsClickable(True)
         hh.setHighlightSections(False)
         hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        for i, w in enumerate([70, 90, 200, 200, 150, 90, 50]):
+        for i, w in enumerate([70, 90, 290, 220, 180, 90, 50]):
             self.tv.setColumnWidth(i, w)
         self.tv.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.hl = HighlightDelegate(self.tv)            # colour IPs, MACs, networks and device IDs
+        for c in (2, 3, 4, 7):
+            self.tv.setItemDelegateForColumn(c, self.hl)
         self.det = QTreeWidget()
         self.det.setHeaderHidden(True)
         self.det.setFont(self.model.mono)
         self.det.setUniformRowHeights(True)
+        self.det.setItemDelegate(HighlightDelegate(self.det))
         self.det.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         cp = QAction('Copy', self.det)
         cp.triggered.connect(lambda: QApplication.clipboard().setText(
@@ -340,6 +345,7 @@ class PacketsPane(QWidget):
         while self.chl.count():
             w = self.chl.takeAt(0).widget()
             if w:
+                w.setParent(None)                   # hide it now, not when Qt gets round to deleting it
                 w.deleteLater()
         for n, f in QUICK:
             b = QToolButton(text=n.replace('&', '&&'))
@@ -756,7 +762,7 @@ def side_icon(k, px=40):
 SIDE = [(None, None), ('p', 'Packets'), ('Analyze', None), ('f', 'Findings'), ('d', 'Devices'), ('w', 'Changes'),
         ('t', 'Traffic'), ('s', 'Response times & errors'), ('o', 'Online board'), ('Network', None),
         ('g', 'Network map'), ('a', 'Available IDs'), ('n', 'Available networks'), ('MS/TP', None),
-        ('m', 'MS/TP trunk'), ('b', 'Bus speed'), ('Tools', None), ('c', 'Compare captures'), ('x', 'Discover')]
+        ('m', 'MS/TP trunk'), ('b', 'Bus speed'), ('Tools', None), ('c', 'Compare captures')]
 VNAME = {'p': 'packets', 'f': 'findings', 'd': 'devices', 'a': 'available-ids', 'n': 'available-networks',
          's': 'response-times', 'c': 'compare', 'b': 'bus-speed', 'o': 'online', 'w': 'changes', 't': 'traffic',
          'm': 'mstp-trunk', 'g': 'network-map', 'x': 'explorer', 'r': 'report'}
@@ -776,6 +782,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.store = store
         self.labels = Labels(store)
+        import bi_common
+        bi_common.LABELS = self.labels          # lets tables and trees highlight addresses
         self.bridge = Bridge()
         self.bridge.call.connect(lambda fn: fn())
         self.setWindowTitle(APP_NAME)
@@ -790,6 +798,10 @@ class MainWindow(QMainWindow):
         self.T0 = 0.0
         self.loaders = []
         self.cap = BL.Capture()
+        try:
+            self.own_ips = set(BL.local_ips()) | {'127.0.0.1'}    # this PC's addresses
+        except OSError:
+            self.own_ips = {'127.0.0.1'}
         self.LT = None
         self.run = False
         self.helper = True
@@ -810,6 +822,7 @@ class MainWindow(QMainWindow):
         self.build_ui()
         self.build_menus()
         self.restore_geometry()
+        QApplication.instance().installEventFilter(self)       # mouse Back button
         QTimer.singleShot(0, self.after_show)
 
     # --------------------------------------------------------------- layout --
@@ -857,6 +870,45 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(col)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
+        # top bar: Back on the left, the Capture | Discover switch in the middle
+        top = QWidget()
+        tb = QHBoxLayout(top)
+        tb.setContentsMargins(6, 6, 6, 4)
+        self.back = QToolButton(text='‹')
+        self.back.setToolTip('Back to where you were (Alt+←)')
+        self.back.setEnabled(False)
+        self.back.setFixedWidth(34)
+        self.back.clicked.connect(self.nav_back)
+        f = self.back.font()
+        f.setPointSize(14)
+        self.back.setFont(f)
+        tb.addWidget(self.back)
+        tb.addStretch(1)
+        seg = QFrame()
+        seg.setObjectName('seg')
+        sl = QHBoxLayout(seg)
+        sl.setContentsMargins(2, 2, 2, 2)
+        sl.setSpacing(0)
+        self.mode_c = QToolButton(text='Capture', checkable=True)
+        self.mode_d = QToolButton(text='Discover', checkable=True)
+        self.mode_c.setChecked(True)
+        mg = QButtonGroup(self)
+        mg.setExclusive(True)
+        for b, colr in ((self.mode_c, '#0071e3'), (self.mode_d, '#0b8f83')):
+            mg.addButton(b)
+            b.setMinimumWidth(120)
+            b.setStyleSheet(f'QToolButton{{border:0;border-radius:6px;padding:4px 22px;font-weight:600}}'
+                            f'QToolButton:checked{{background:{colr};color:white}}')
+            sl.addWidget(b)
+        seg.setStyleSheet('QFrame#seg{background:rgba(120,120,128,0.18);border-radius:8px}')
+        self.mode_c.setToolTip('Captures and their analysis')
+        self.mode_d.setToolTip('Find devices on the network and read their points (Ctrl+5)')
+        self.mode_c.clicked.connect(lambda: self.goto(self.last_capture_view))
+        self.mode_d.clicked.connect(lambda: self.goto('x'))
+        tb.addWidget(seg)
+        tb.addStretch(1)
+        tb.addSpacing(34)                      # balances the Back button so the switch is centred
+        v.addWidget(top)
         # write-access and update banners
         self.wb = QFrame()
         self.wb.setStyleSheet('QFrame{background:#c42b1c} QLabel{color:white} QPushButton{padding:2px 10px}')
@@ -887,16 +939,8 @@ class MainWindow(QMainWindow):
         # capture tabs
         self.tabrow = QWidget()
         tl = QHBoxLayout(self.tabrow)
-        tl.setContentsMargins(6, 4, 6, 0)
+        tl.setContentsMargins(6, 0, 6, 0)
         tl.setSpacing(4)
-        self.back = QToolButton(text='‹')
-        self.back.setToolTip('Back to where you were (Alt+←)')
-        self.back.setEnabled(False)
-        self.back.clicked.connect(self.nav_back)
-        f = self.back.font()
-        f.setPointSize(14)
-        self.back.setFont(f)
-        tl.addWidget(self.back)
         self.tabbar = QTabBar()
         self.tabbar.setTabsClosable(True)
         self.tabbar.setMovable(True)
@@ -1081,8 +1125,15 @@ class MainWindow(QMainWindow):
             self.show_view(k)
 
     def goto(self, k):
+        if k == 'x':                            # Discover is its own mode, not a sidebar entry
+            self.show_view('x')
+            return
         it = self.side_items.get(k)
-        if it:
+        if it is None:
+            return
+        if self.side.currentItem() is it:       # e.g. coming back from Discover
+            self.show_view(k)
+        else:
             self.side.setCurrentItem(it)
 
     def show_view(self, k):
@@ -1094,6 +1145,8 @@ class MainWindow(QMainWindow):
         w = self.view(k)
         self.stack.setCurrentWidget(w)
         disc = k == 'x'
+        (self.mode_d if disc else self.mode_c).setChecked(True)
+        self.side.setVisible(not disc)
         self.tabrow.setVisible(not disc)
         self.header.setVisible(not disc)
         self.qbox.setVisible(k == 'p')
@@ -1101,6 +1154,7 @@ class MainWindow(QMainWindow):
         self.live.setVisible(not disc and bool(self.ac and self.ac.live))
         if k != 'p' and hasattr(w, 'refresh'):
             w.refresh()
+        self.update_back()
 
     def refresh_views(self):
         """The active capture or its analysis changed: update the current view and the badges."""
@@ -1117,24 +1171,38 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------- navigation --
     def nav_note(self, new_view, node=None):
+        """Remember the view we are leaving (Discover keeps its own page history)."""
         if self.nav_lock:
             return
-        self.nav.append((self.cur_view, self.view('x').node_snapshot() if 'x' in self.views else None))
+        self.nav.append(self.cur_view)
         del self.nav[:-50]
-        self.back.setEnabled(True)
+        self.update_back()
 
     def nav_back(self):
+        """Back: first through the pages of Discover, then to the previous view."""
+        if self.cur_view == 'x' and 'x' in self.views and self.views['x'].back():
+            self.update_back()
+            return
         if not self.nav:
             return
-        v, node = self.nav.pop()
+        v = self.nav.pop()
         self.nav_lock = True
         try:
-            if v == 'x' and node is not None:
-                self.view('x').restore_node(node)
             self.goto(v)
         finally:
             self.nav_lock = False
-        self.back.setEnabled(bool(self.nav))
+        self.update_back()
+
+    def update_back(self):
+        disc = self.cur_view == 'x' and 'x' in self.views and self.views['x'].can_back()
+        self.back.setEnabled(bool(self.nav) or disc)
+
+    def eventFilter(self, obj, ev):
+        """The Back button on a mouse goes back too."""
+        if ev.type() == QEvent.Type.MouseButtonPress and ev.button() == Qt.MouseButton.BackButton and self.isActiveWindow():
+            self.nav_back()
+            return True
+        return False
 
     # ----------------------------------------------------------------- tabs --
     def _tab_at(self, i):
@@ -1183,8 +1251,11 @@ class MainWindow(QMainWindow):
         self.qbox.setText(t.q)
         self.qbox.blockSignals(False)
         self.pk.sel = next((r for r in t.P if r.no == t.sel_no), None) if t.sel_no else None
-        self.pk.clear_details() if self.pk.sel is None else None
         self.pk.relist()
+        if self.pk.sel is None:
+            self.pk.clear_details()
+        else:
+            self.pk.show_packet(self.pk.sel)
         self.pk.show_list(bool(self.P))
         if not self.P:
             self.pk.set_empty('Live capture ready: choose an interface and press Start.\nSaved captures open in their own tabs (use Open capture or the + button).'
@@ -1242,7 +1313,7 @@ class MainWindow(QMainWindow):
         if activate or not self.ac:
             self.switch_tab(t)
         self.update_tabs()
-        ld = Loader(t, data, self.local_net())
+        ld = Loader(t, data, self.local_net(), self.own_ips)
         ld.progress.connect(self._load_progress)
         ld.finished_ok.connect(self._loaded)
         ld.failed.connect(self._load_failed)
@@ -1539,7 +1610,7 @@ class MainWindow(QMainWindow):
         if self.live_dirty and not self.analysing:
             self.live_dirty = False
             self.analysing = True
-            a = Analyser(LT, list(LT.P), LT.T0, self.local_net())
+            a = Analyser(LT, list(LT.P), LT.T0, self.local_net(), self.own_ips)
             a.done.connect(self._live_analysed)
             a.finished.connect(a.deleteLater)
             self._an = a

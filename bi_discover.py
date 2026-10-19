@@ -10,8 +10,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSplitter,
-                               QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
-                               QVBoxLayout, QWidget)
+                               QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
 import bi_explore as E
@@ -87,8 +86,38 @@ class DiscoverView(QWidget):
         ll.addWidget(self.leg)
         self.left = left
         self.split.addWidget(left)
+        rightw = QWidget()
+        rv = QVBoxLayout(rightw)
+        rv.setContentsMargins(0, 0, 0, 0)
+        rv.setSpacing(0)
+        nav = QWidget()                          # Back / Discover home / where you are
+        nl = QHBoxLayout(nav)
+        nl.setContentsMargins(14, 8, 14, 6)
+        nl.setSpacing(6)
+        self.b_back = QToolButton(text='‹  Back')
+        self.b_back.setToolTip('Back to what you were looking at before (Alt+←, or the mouse Back button)')
+        self.b_home = QToolButton(text='⌂  Discover home')
+        self.b_home.setToolTip('Back to the Discover start page')
+        nl.addWidget(self.b_back)
+        nl.addWidget(self.b_home)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        nl.addWidget(sep)
+        self.crumbw = QWidget()
+        self.crumbs = QHBoxLayout(self.crumbw)
+        self.crumbs.setContentsMargins(4, 0, 0, 0)
+        self.crumbs.setSpacing(2)
+        nl.addWidget(self.crumbw, 1)
+        rv.addWidget(nav)
+        ln = QFrame()
+        ln.setFrameShape(QFrame.Shape.HLine)
+        rv.addWidget(ln)
         self.right = Page(1100)
-        self.split.addWidget(self.right)
+        rv.addWidget(self.right, 1)
+        self.split.addWidget(rightw)
+        self.hist = []                           # earlier places in Discover, for Back
+        self.b_back.clicked.connect(self.back)
+        self.b_home.clicked.connect(self.home)
         self.split.setSizes([320, 900])
         self.split.setStretchFactor(1, 1)
         v.addWidget(self.split, 1)
@@ -148,17 +177,13 @@ class DiscoverView(QWidget):
 
     def open_device(self, k):
         self.live = True
+        prev = self.node
         en = self.select(k)
+        self._push(prev)
         if en:
             self.gopen.add('n' + ('local' if en['net'] is None else str(en['net'])))
         self.win.goto('x')
         self.refresh()
-
-    def node_snapshot(self):
-        return dict(self.node) if self.node else None
-
-    def restore_node(self, n):
-        self.node = n
 
     # --------------------------------------------------------------- redraw --
     def ex_changed(self):
@@ -317,13 +342,14 @@ class DiscoverView(QWidget):
         d = it.data(0, K_ROLE)
         if not d or d[0] in ('g', 'pk'):
             return
-        self.win.nav_note('x')
+        prev = self.node
         if d[0] == 'd':
             self.select(d[1])
         elif d[0] == 'c':
             self.node = {'k': d[1], 't': d[2]}
         elif d[0] == 'p':
             self.node = {'k': d[1], 'o': d[2]}
+        self._push(prev)
         self.build_right(None, None)
 
     def _checked(self, it, _col):
@@ -350,34 +376,12 @@ class DiscoverView(QWidget):
         p.clear()
         n = self.node
         en = self.entry(n['k']) if n else None
+        e = en['ex'] if en else None
+        row = next((o for o in (e or {}).get('objs') or [] if o['o'] == n.get('o')), None) if en and n.get('o') is not None else None
+        self.nav_bar(n, en, row)
         if not n or not en:
             self.start_page(p, D, AL)
         else:
-            e = en['ex']
-            net = 'This network' if en['net'] is None else f"Network {en['net']}"
-            crumb = QHBoxLayout()
-            crumb.addWidget(label(net + '  ›', muted=True, wrap=False))
-            if n.get('t') is not None or n.get('o') is not None:
-                b = QToolButton(text=f"Device {en['id']}")
-                b.setAutoRaise(True)
-                b.clicked.connect(lambda: self.go_node({'k': n['k']}))
-                crumb.addWidget(b)
-                if n.get('o') is not None:
-                    crumb.addWidget(label('›', muted=True, wrap=False))
-                    t = E.o_t(n['o'])
-                    b2 = QToolButton(text=E.cat_name(t))
-                    b2.setAutoRaise(True)
-                    b2.clicked.connect(lambda: self.go_node({'k': n['k'], 't': t}))
-                    crumb.addWidget(b2)
-                else:
-                    crumb.addWidget(label('› ' + E.cat_name(n['t']), muted=True, wrap=False))
-            else:
-                crumb.addWidget(label(f"Device {en['id']}", muted=True, wrap=False))
-            crumb.addStretch(1)
-            cw = QWidget()
-            cw.setLayout(crumb)
-            p.add(cw)
-            row = next((o for o in (e or {}).get('objs') or [] if o['o'] == n.get('o')), None) if n.get('o') is not None else None
             if row and e:
                 self.point_page(p, en, e, row)
             elif n.get('t') is not None and e:
@@ -389,9 +393,81 @@ class DiscoverView(QWidget):
         QTimer.singleShot(0, lambda: p.scroll.verticalScrollBar().setValue(y))
 
     def go_node(self, n):
-        self.win.nav_note('x')
+        prev = self.node
         self.node = n
+        self._push(prev)
         self.refresh()
+
+    # ----------------------------------------------------------- navigation --
+    def _push(self, prev):
+        """Remember where we were (for Back) when the shown page changes."""
+        if prev != self.node:
+            self.hist.append(prev)
+            del self.hist[:-60]
+
+    def can_back(self):
+        return bool(self.pk and not self.pk.get('run')) or bool(self.hist) or self.node is not None
+
+    def back(self):
+        """Back one step inside Discover. Returns False when there is nowhere to go back to."""
+        if self.pk and not self.pk.get('run'):
+            self.pk = None                       # leave the 'choose devices' step
+        elif self.hist:
+            self.node = self.hist.pop()
+        elif self.node is not None:
+            self.node = None
+        else:
+            return False
+        self.refresh()
+        return True
+
+    def home(self):
+        if self.node is None and not self.pk:
+            return
+        if self.pk and self.pk.get('run'):
+            return self.win.toast('Wait for the discover to finish, or press Stop')
+        self.pk = None
+        prev = self.node
+        self.node = None
+        self._push(prev)
+        self.refresh()
+
+    def nav_bar(self, n, en, row):
+        """Back / home buttons and a clickable path: Discover › Network › Device › Category › Point."""
+        self.b_back.setEnabled(self.can_back())
+        self.b_home.setEnabled(n is not None or bool(self.pk))
+        self.win.update_back()
+        while self.crumbs.count():
+            w = self.crumbs.takeAt(0).widget()
+            if w:
+                w.setParent(None)                   # hide it now, not when Qt gets round to deleting it
+                w.deleteLater()
+        parts = [('Discover', self.home if (n or self.pk) else None)]
+        if self.pk:
+            parts.append(('Choose devices', None))
+        elif n and en:
+            parts.append(('This network' if en['net'] is None else f"Network {en['net']}", None))
+            dev = f"Device {en['id']}" + (f" “{en['name']}”" if en['name'] else '')
+            deeper = n.get('t') is not None or n.get('o') is not None
+            parts.append((dev, (lambda k=n['k']: self.go_node({'k': k})) if deeper else None))
+            t = n['t'] if n.get('t') is not None else E.o_t(n['o']) if n.get('o') is not None else None
+            if t is not None:
+                parts.append((E.cat_name(t), (lambda k=n['k'], t=t: self.go_node({'k': k, 't': t})) if n.get('o') is not None else None))
+            if n.get('o') is not None:
+                parts.append((row['name'] or f"{E.sd_ty(row['ty'])} {row['inst']}" if row else 'Point', None))
+        for i, (text, fn) in enumerate(parts):
+            if i:
+                self.crumbs.addWidget(label('›', muted=True, wrap=False))
+            if fn:
+                b = QToolButton(text=text)
+                b.setAutoRaise(True)
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.setStyleSheet(f"QToolButton{{color:{colors()['ac']}}}")
+                b.clicked.connect(fn)
+                self.crumbs.addWidget(b)
+            else:
+                self.crumbs.addWidget(label(text, bold=(i == len(parts) - 1), wrap=False))
+        self.crumbs.addStretch(1)
 
     def start_page(self, p, D, AL):
         cap = [d for d in AL if d['cap']]
@@ -733,9 +809,7 @@ class DiscoverView(QWidget):
 
     # -------------------------------------------------------------- actions --
     def new_discover(self):
-        self.node = None
-        self.pk = None
-        self.refresh()
+        self.home()
 
     def pick_capture(self):
         self.live = True
@@ -793,7 +867,9 @@ class DiscoverView(QWidget):
                 self.gopen.clear()
                 self.ex.cache()
                 if first:
+                    prev = self.node
                     self.node = {'k': first['key']}
+                    self._push(prev)
                     self.open.add(first['key'])
                 self.refresh()
             self.win.on_ui(done)
@@ -805,7 +881,9 @@ class DiscoverView(QWidget):
             return self.win.toast('This device is not reachable by IP')
         e['stale'] = 1
         self.open.add(e['key'])
+        prev = self.node
         self.node = {'k': e['key']}
+        self._push(prev)
 
         def work():
             self.ex.browse(e)

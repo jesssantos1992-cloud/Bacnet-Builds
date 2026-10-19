@@ -59,18 +59,54 @@ UNC = {0: ['I-Am', 'a device announcing its device ID and address'],
 RJ = {0: 'other error', 1: 'the router has no route to that network', 2: 'the router is busy', 3: 'unknown message type',
       4: 'message too long', 5: 'security error', 6: 'addressing error'}
 EC = {0: 'device', 1: 'object', 2: 'property', 3: 'resources', 4: 'security', 5: 'services', 6: 'vt', 7: 'communication'}
+# BACnet error codes (ASHRAE 135), worded so a technician can read them
 ECD = {0: 'other', 1: 'authentication failed', 2: 'configuration in progress', 3: 'device busy',
-       4: 'dynamic creation not supported', 5: 'file access denied', 7: 'inconsistent parameters', 9: 'invalid data type',
-       13: 'invalid parameter data type', 16: 'missing required parameter', 17: 'no objects of specified type',
-       18: 'no space for object', 20: 'no space to write property', 23: 'object deletion not permitted',
-       24: 'object identifier already exists', 25: 'operational problem', 26: 'password failure', 27: 'read access denied',
-       29: 'service request denied', 30: 'timeout', 31: 'unknown object', 32: 'unknown property',
-       36: 'unsupported object type', 37: 'value out of range', 40: 'write access denied', 42: 'invalid array index',
-       43: 'COV subscription failed', 44: 'not a COV property', 45: 'optional functionality not supported',
+       4: 'dynamic creation not supported', 5: 'file access denied', 6: 'incompatible security levels',
+       7: 'inconsistent parameters', 8: 'inconsistent selection criterion', 9: 'invalid data type',
+       10: 'invalid file access method', 11: 'invalid file start position', 12: 'invalid operator name',
+       13: 'invalid parameter data type', 14: 'invalid time stamp', 15: 'key generation error',
+       16: 'missing required parameter', 17: 'no objects of specified type', 18: 'no space for object',
+       19: 'no space to add list element', 20: 'no space to write property', 21: 'no VT sessions available',
+       22: 'property is not a list', 23: 'object deletion not permitted', 24: 'object identifier already exists',
+       25: 'operational problem', 26: 'password failure', 27: 'read access denied', 28: 'security not supported',
+       29: 'service request denied', 30: 'timeout', 31: 'unknown object', 32: 'unknown property', 34: 'unknown VT class',
+       35: 'unknown VT session', 36: 'unsupported object type', 37: 'value out of range', 38: 'VT session already closed',
+       39: 'VT session termination failure', 40: 'write access denied', 41: 'character set not supported',
+       42: 'invalid array index', 43: 'COV subscription failed', 44: 'not a COV property',
+       45: 'optional functionality not supported', 46: 'invalid configuration data', 47: 'data type not supported',
        48: 'duplicate name', 49: 'duplicate object ID', 50: 'property is not an array'}
+EC_WORD = {0: 'device', 1: 'object', 2: 'property', 3: 'resource', 4: 'security', 5: 'service', 6: 'terminal session',
+           7: 'communication'}
 RR = {0: 'other', 1: 'buffer overflow', 2: 'inconsistent parameters', 3: 'invalid parameter type', 4: 'invalid tag',
       5: 'missing required parameter', 6: 'parameter out of range', 7: 'too many arguments', 8: 'undefined enumeration',
       9: 'unrecognized service'}
+
+
+def error_text(c1, c2):
+    """Plain-English text for a BACnet error (class c1, code c2) - no raw numbers."""
+    cls = EC_WORD.get(c1, '')
+    if c2 in ECD and c2 != 0:
+        return ECD[c2]
+    if cls:
+        return f'a {cls} problem (no detail given)' if c2 == 0 else f'a {cls} problem the device did not explain'
+    return 'a problem the device did not explain'
+
+
+def error_codes(d, k, L):
+    """Error class and code from an Error PDU starting at k. Some services wrap them in extra
+    context tags (e.g. Private Transfer, Write Property Multiple), so take the first two enumerated values."""
+    found = []
+    n = 0
+    while k < L and len(found) < 2 and n < 12:
+        a = tg(d, k)
+        n += 1
+        if a.cx and a.o:
+            k = a.v
+            continue
+        if not a.cx and a.n == 9:
+            found.append(num(d[a.v:a.v + a.len]))
+        k = a.v + (0 if (not a.cx and a.n == 1) else a.len)
+    return (found + [None, None])[:2]
 AR = {0: 'other', 1: 'buffer overflow', 2: 'invalid state', 3: 'preempted by higher-priority task',
       4: 'segmentation not supported', 5: 'security error', 6: 'insufficient security', 7: 'window size out of range',
       8: 'application exceeded reply time', 9: 'out of resources', 10: 'timeout', 11: 'message too long'}
@@ -806,25 +842,21 @@ def npdu(d, L, o, r, tree):
                 except IndexError:
                     pass
             else:
-                a = d[i + 3] & 7
-                c1 = num(d[i + 4:i + 4 + a])
-                j = i + 4 + a
-                c2 = num(d[j + 1:j + 1 + (d[j] & 7)])
-                ec = EC.get(c1) or 'class ' + str(c1)
-                ecd = ECD.get(c2) or 'code ' + str(c2)
-                s = f'{nm} failed: {ec} – {ecd} (#{inv})'
-                e = f'The device could not do request #{inv}.'
-                r.er = {'k': 'error', 'txt': f'{ec} – {ecd}', 'svc': nm}
+                c1, c2 = error_codes(d, i + 3, L)
+                why = error_text(c1, c2)
+                s = f'{nm} failed: {why} (#{inv})'
+                e = f'The device could not do request #{inv}: {why}.'
+                r.er = {'k': 'error', 'txt': why, 'svc': nm}
         elif t == 4:
             s = f'Segment-ACK (#{inv})'
             e = 'Confirms receipt of one part of a long message that was split up.'
         elif t == 6:
-            why = RR.get(d[i + 2]) or 'reason ' + str(d[i + 2])
+            why = RR.get(d[i + 2]) or 'a reason the device did not explain'
             s = f'Reject (#{inv}): {why}'
             e = f'The device refused request #{inv} as invalid, without trying it.'
             r.er = {'k': 'reject', 'txt': why}
         else:
-            why = AR.get(d[i + 2]) or 'reason ' + str(d[i + 2])
+            why = AR.get(d[i + 2]) or 'a reason the device did not explain'
             s = f'Abort (#{inv}): {why}'
             e = f'The conversation about request #{inv} was cancelled.'
             r.er = {'k': 'abort', 'txt': why}
@@ -1382,6 +1414,8 @@ def pl(n, w) -> str:
 
 
 def gap(s) -> str:
+    if 0 < s < 1:
+        return f'{jsround(s * 1000)} ms'          # MS/TP devices talk many times a second ("every 0 s" before)
     return f'{tofixed(s / 3600, 1)} h' if s >= 3600 else f'{tofixed(s / 60, 1)} min' if s >= 60 else f'{jsround(s)} s'
 
 
@@ -1493,8 +1527,13 @@ def _median_sorted(a):
     return a[len(a) // 2] if a else 0
 
 
-def analyze(P, T0, local_net=None) -> Analysis:
-    """Everything the views need, computed from the decoded packets P."""
+ER_WORD = {'error': 'failed', 'reject': 'rejected', 'abort': 'cancelled'}
+
+
+def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
+    """Everything the views need, computed from the decoded packets P.
+    own_ips: this computer's addresses (its own Who-Is scans are not reported as a flood)."""
+    own_ips = set(own_ips or ())
     dev, act, ids, gws, dv = {}, {}, {}, {}, {}
     via, adv, wi, nmap = {}, {}, {}, {}
     nets = set()
@@ -1534,12 +1573,12 @@ def analyze(P, T0, local_net=None) -> Analysis:
             if q is not None:
                 del pend[k]
                 if q.wrx is not None:
-                    q.wrx['res'] = f"{r.er['k']}: {r.er['txt']}" if r.er else 'accepted'
+                    q.wrx['res'] = f"{ER_WORD[r.er['k']]}: {r.er['txt']}" if r.er else 'accepted'
                 if r.er:
                     ek = (r.key or r.src) + '|' + r.er['k'] + ': ' + r.er['txt']
                     e = erm.get(ek)
                     if e is None:
-                        e = erm[ek] = {'who': r.key or r.src, 'why': r.er['k'] + ': ' + r.er['txt'], 'k': r.er['k'],
+                        e = erm[ek] = {'who': r.key or r.src, 'why': ER_WORD[r.er['k']] + ': ' + r.er['txt'], 'k': r.er['k'],
                                        'svc': {}, 'n': 0, 'no': r.no}
                     e['n'] += 1
                     e['svc'][q.rs] = 1
@@ -1678,7 +1717,7 @@ def analyze(P, T0, local_net=None) -> Analysis:
         if r.adv:
             for n in r.adv:
                 adv.setdefault(n, {})[r.o] = 1
-        if r.whois:
+        if r.whois and r.src.rsplit(':', 1)[0] not in own_ips:      # this PC's own scans are not a flood
             k = f'{r.o}|{math.floor(r.t)}'
             wi[k] = wi.get(k, 0) + 1
     taken = set(dev.keys())
@@ -1772,6 +1811,16 @@ def analyze(P, T0, local_net=None) -> Analysis:
                         f"{', …' if len(vs) > 6 else ''}")
             return f'Gateway {x} announced a route to this network, but none of its devices were seen'
         ev = [gdesc(x) for x in rs]
+        if n == 0:
+            out.append({'s': 'NOTE', 't': 'Several gateways refer to network 0 (the local network)',
+                        'w': f'{len(rs)} gateways mention network 0. Network 0 is not a real network number: devices and routers '
+                             'use it to mean "the local network", so many devices can point to it at once.',
+                        'ev': ev,
+                        'y': 'Usually nothing to fix. It only matters if a router port has actually been configured with network '
+                             'number 0, which BACnet does not allow.',
+                        'f': ['No action is needed if every router port has its own network number (1 or higher).',
+                              'If a router shows network 0 in its port settings, give that port an unused number (see Available networks).']})
+            continue
         if dj:
             out.append({'s': 'SERIOUS' if all(len(a) > 1 for a in ss) else 'WARNING',
                         't': f'Two different networks seem to share network number {n}',
@@ -1975,7 +2024,7 @@ def analyze(P, T0, local_net=None) -> Analysis:
                           'If nobody should be doing this, find the source address and who uses that computer or controller.',
                           'If a device was left with communication disabled, send "enable communication" or restart it (the time-out may also end it).',
                           'Use the Changes tab to see everything around that time.']})
-    bw = [w for w in wrs if re.match(r'^(error|reject|abort)', w['res'])]
+    bw = [w for w in wrs if re.match(r'^(failed|rejected|cancelled)', w['res'])]
     if bw:
         g = {}
         for w in bw:

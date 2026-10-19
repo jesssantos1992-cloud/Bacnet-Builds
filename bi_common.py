@@ -9,9 +9,10 @@ import re
 import time
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPainter, QPalette, QPen
-from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel, QSizePolicy,
-                               QTableWidget, QTableWidgetItem, QToolTip, QVBoxLayout, QWidget)
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPainter, QPalette, QPen, QTextDocument
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QSizePolicy,
+                               QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem,
+                               QToolTip, QVBoxLayout, QWidget)
 
 MONO = 'Cascadia Mono, Consolas, monospace'
 
@@ -74,11 +75,12 @@ class Labels:
         s = re.sub(r'\b([Dd]evice) (\d+)\b', lambda m: m.group(0) + (f' “{self.d(m.group(2))}”' if self.d(m.group(2)) else ''), s)
         return re.sub(r'\bnetwork (\d+)\b', lambda m: m.group(0) + (f' “{self.n(m.group(1))}”' if self.n(m.group(1)) else ''), s)
 
-    HRE = re.compile(r'(\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b)|(MS/TP MAC \d+|\bMAC \d+\b)|(\b[Nn]etwork \d+\b)|'
+    HRE = re.compile(r'(\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b)|(MS/TP MAC \d+|\bMAC \d+\b)|(\b(?:[Nn]etwork|net) \d+\b)|'
                      r'(\b[Dd]evice(?: ID)? \d+\b)|(\bvia gateway\b)')
 
-    def hl(self, x, for_export=False):
-        """HTML: colour IP addresses, MS/TP MACs, networks and device IDs (as on the original pages)."""
+    def hl(self, x, for_export=False, names=True):
+        """HTML: colour IP addresses, MS/TP MACs, networks and device IDs (as on the original pages).
+        names=False when the text already carries the “name” after each number."""
         c = colors() if not for_export else colors_light()
         out = []
         last = 0
@@ -92,12 +94,61 @@ class Labels:
                 kind = 'ip' if m.group(1) else 'mac' if m.group(2) else 'net' if m.group(3) else 'id'
                 out.append(f'<span style="background-color:{c[kind]};font-family:{MONO}">&nbsp;{t}&nbsp;</span>')
                 num = re.search(r'\d+', m.group(0)).group(0) if kind in ('net', 'id') else None
-                lab = self.n(num) if kind == 'net' else self.d(num) if kind == 'id' else ''
+                lab = (self.n(num) if kind == 'net' else self.d(num) if kind == 'id' else '') if names else ''
                 if lab:
                     out.append(f' <i style="color:{c["mu"]}">“{esc(lab)}”</i>')
             last = m.end()
         out.append(esc(s[last:]))
         return ''.join(out)
+
+
+LABELS = None          # set by the main window; used by HighlightDelegate
+
+
+class HighlightDelegate(QStyledItemDelegate):
+    """Draws a table / tree cell with IP addresses, MACs, networks and device IDs highlighted."""
+
+    def paint(self, p, opt, ix):
+        o = QStyleOptionViewItem(opt)
+        self.initStyleOption(o, ix)
+        text = o.text
+        if not text or LABELS is None or not Labels.HRE.search(text):
+            return super().paint(p, opt, ix)
+        o.text = ''
+        w = o.widget
+        st = w.style() if w else QApplication.style()
+        st.drawControl(QStyle.ControlElement.CE_ItemViewItem, o, p, w)
+        r = st.subElementRect(QStyle.SubElement.SE_ItemViewItemText, o, w)
+        sel = bool(o.state & QStyle.StateFlag.State_Selected)
+        fg = o.palette.color(QPalette.ColorRole.HighlightedText if sel else QPalette.ColorRole.Text)
+        b = o.index.data(Qt.ItemDataRole.ForegroundRole)
+        if b is not None and not sel:
+            fg = b.color() if hasattr(b, 'color') else QColor(b)
+        doc = self._doc(text, o.font, fg)
+        p.save()
+        p.setClipRect(r)
+        p.translate(r.left() + 1, r.top() + max(0, (r.height() - doc.size().height()) / 2))
+        doc.drawContents(p)
+        p.restore()
+
+    @staticmethod
+    def _doc(text, font, fg):
+        doc = QTextDocument()
+        doc.setDefaultFont(font)
+        doc.setDocumentMargin(0)
+        bold = 'font-weight:600;' if font.bold() else ''
+        doc.setHtml(f'<span style="white-space:pre;color:{fg.name()};{bold}">{LABELS.hl(text, names=False)}</span>')
+        return doc
+
+    def sizeHint(self, opt, ix):
+        s = super().sizeHint(opt, ix)
+        text = ix.data(Qt.ItemDataRole.DisplayRole)
+        if text and LABELS is not None and Labels.HRE.search(str(text)):
+            o = QStyleOptionViewItem(opt)
+            self.initStyleOption(o, ix)
+            extra = s.width() - o.fontMetrics.horizontalAdvance(str(text))      # icon, indent and padding
+            s.setWidth(int(self._doc(str(text), o.font, QColor('black')).idealWidth()) + max(extra, 12))
+        return s
 
 
 def colors_light():
@@ -175,6 +226,7 @@ class Table(QTableWidget):
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.verticalHeader().setDefaultSectionSize(24)
+        self.setItemDelegate(HighlightDelegate(self))
         self._data = []
         self.itemActivated.connect(lambda it: self.rowActivated.emit(self._data[it.row()] if it.row() < len(self._data) else None))
 

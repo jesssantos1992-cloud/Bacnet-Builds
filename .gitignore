@@ -1,0 +1,7 @@
+# Build output (made by build_windows.bat / build_installer.bat) - attach installers to GitHub Releases instead
+build/
+dist/
+installer/
+*.spec
+__pycache__/
+*.pyc

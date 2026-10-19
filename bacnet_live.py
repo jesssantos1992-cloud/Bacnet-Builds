@@ -1,35 +1,21 @@
-#!/usr/bin/env python3
 """
-bacnet_live.py - Live BACnet capture with a Wireshark-style web interface.
+bacnet_live.py - the capture and network back end of BACnet Inspector (used by bi_app.py).
 
-Run it on the PC that is plugged into (or mirrored from) the BACnet network.
-It opens bacnet_inspector.html in your browser with live capture switched on.
-Keep bacnet_live.py and bacnet_inspector.html in the same folder.
-
-    python bacnet_live.py                  # opens the browser, pick an interface, press Start
-    python bacnet_live.py --lan            # also reachable from an iPhone/iPad on the same Wi-Fi
-    python bacnet_live.py -i 5 -f "udp port 47808"          # start straight away (dumpcap interface 5)
-    python bacnet_live.py --serial COM3 --baud 38400        # live MS/TP from a USB-RS485 adapter
+  * Capture   - live capture: Wireshark's dumpcap, an MS/TP serial adapter, or raw sockets
+  * RELAY     - the read-only UDP relay used by Discover (only Who-Is, reads and one guarded write)
+  * send_request, list_interfaces, autobaud, update_check / update_install, settings folder
 
 Three ways to capture (the interface list shows whatever is available):
-  1. Wireshark/Npcap  - install Wireshark (https://www.wireshark.org); this uses its
-                        "dumpcap". Supports a capture filter (BPF). Best choice.
-  2. Serial MS/TP     - a USB-RS485 adapter wired to the trunk. Needs:  pip install pyserial
+  1. Wireshark/Npcap  - install Wireshark (it includes "dumpcap"). Supports a capture filter (BPF). Best choice.
+  2. Serial MS/TP     - a USB-RS485 adapter wired to the trunk (needs pyserial).
   3. Built-in raw     - BACnet/IP only, no install, but needs Administrator (Windows) or root.
-
-iPhone/iPad cannot capture packets themselves (iOS does not allow it). With --lan they can
-watch the capture running on your PC. The link contains a secret token; the connection is
-plain HTTP, so only use --lan on a network you trust.
 """
 from __future__ import annotations
 
-import argparse
-import base64
 import ipaddress
 import json
 import os
 import re
-import secrets
 import shutil
 import socket
 import struct
@@ -38,13 +24,9 @@ import sys
 import threading
 import time
 import urllib.request
-import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, unquote, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BASE = getattr(sys, "_MEIPASS", HERE)                 # inside a packaged .exe the page is unpacked here
-UI_FILE = os.path.join(BASE, "bacnet_inspector.html")
+BASE = getattr(sys, "_MEIPASS", HERE)                 # inside a packaged .exe the bundled files are unpacked here
 NOWIN = 0x08000000 if os.name == "nt" else 0          # hide console windows on Windows
 MAX_PACKETS = 200_000
 
@@ -334,9 +316,6 @@ class Capture:
         self.stop_ev = threading.Event()
         self.proc = None
         self.thread = None
-        self.files = {}                   # id -> path of capture files to open as tabs
-        self.queue = []                   # ids the web page has not picked up yet
-        self.fid = 0
 
     def add(self, ts, lt, data):
         with self.lock:
@@ -349,27 +328,6 @@ class Capture:
     def clear(self):
         with self.lock:
             self.pk, self.base = [], 0
-
-    def add_file(self, path):
-        with self.lock:
-            self.fid += 1
-            self.files[self.fid] = path
-            self.queue.append(self.fid)
-
-    def pending(self):
-        with self.lock:
-            out = [{"id": i, "name": os.path.basename(self.files[i]), "path": self.files[i]} for i in self.queue]
-            self.queue.clear()
-            return out
-
-    def fetch(self, since):
-        with self.lock:
-            end = self.base + len(self.pk)
-            since = min(max(since, self.base), end)
-            items = self.pk[since - self.base: since - self.base + 3000]
-            return {"n": since + len(items), "running": self.running, "err": self.err,
-                    "packets": [{"t": t, "lt": lt, "d": base64.b64encode(d).decode()}
-                                for t, lt, d in items]}
 
     def pcapng(self):
         with self.lock:
@@ -538,7 +496,6 @@ class Capture:
         s.close()
 
 
-# ------------------------------------------------------------------ server ---
 # ---- sending (BACnet/IP only) ----------------------------------------------------------------
 # Each message is one UDP broadcast: BVLC "Original-Broadcast-NPDU" + NPDU (+ APDU).
 PKTS = {
@@ -825,189 +782,6 @@ class Relay:
 RELAY = Relay()
 
 
-class Handler(BaseHTTPRequestHandler):
-    cap: Capture
-    token = ""
-    on_open = None                  # called when another launch hands us a file
-
-    def log_message(self, *a):
-        pass
-
-    def _send(self, code, body, ctype="application/json", extra=None):
-        if isinstance(body, (dict, list)):
-            body = json.dumps(body).encode()
-        elif isinstance(body, str):
-            body = body.encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _auth(self):
-        q = parse_qs(urlparse(self.path).query)
-        t = self.headers.get("X-Token") or (q.get("t") or [""])[0]
-        if secrets.compare_digest(t, self.token):
-            return True
-        self._send(403, "Wrong or missing token - open the link printed in the terminal.", "text/plain")
-        return False
-
-    def do_GET(self):
-        if not self._auth():
-            return
-        u = urlparse(self.path)
-        if u.path == "/":
-            try:
-                with open(UI_FILE, "rb") as f:
-                    self._send(200, f.read(), "text/html; charset=utf-8")
-            except OSError:
-                self._send(404, "bacnet_inspector.html must be in the same folder as bacnet_live.py",
-                           "text/plain")
-        elif u.path == "/api/udp/recv":
-            q = parse_qs(u.query)
-            RELAY.open()
-            self._send(200, RELAY.recv(int((q.get("since") or ["0"])[0]), min(2.0, float((q.get("wait") or ["1"])[0]))))
-        elif u.path == "/api/update/check":
-            self._send(200, update_check())
-        elif u.path == "/api/interfaces":
-            self._send(200, list_interfaces())
-        elif u.path == "/api/sendinfo":
-            self._send(200, local_ips())
-        elif u.path == "/api/packets":
-            since = int((parse_qs(u.query).get("since") or ["0"])[0] or 0)
-            self._send(200, self.cap.fetch(since))
-        elif u.path == "/api/pending":                  # files to open as new tabs
-            self._send(200, self.cap.pending())
-        elif u.path == "/api/file":
-            fid = int((parse_qs(u.query).get("id") or ["0"])[0] or 0)
-            f = self.cap.files.get(fid)
-            if f and os.path.isfile(f):
-                with open(f, "rb") as fh:
-                    self._send(200, fh.read(), "application/octet-stream")
-            else:
-                self._send(404, {"error": "no such file"})
-        elif u.path == "/api/session":
-            self._send(200, load_session())
-        elif u.path == "/api/save":
-            self._send(200, self.cap.pcapng(), "application/octet-stream",
-                       {"Content-Disposition": 'attachment; filename="bacnet_capture.pcapng"'})
-        else:
-            self._send(404, {"error": "not found"})
-
-    def do_POST(self):
-        if not self._auth():
-            return
-        n = int(self.headers.get("Content-Length") or 0)
-        p = urlparse(self.path).path
-        if p == "/api/write":                           # Save / Save As from the page
-            path = unquote(self.headers.get("X-Path") or "")
-            if not path or os.path.splitext(path)[1].lower() not in (
-                    ".html", ".pcapng", ".pcap", ".csv", ".txt", ".json"):
-                self._send(400, {"error": "unsupported file type"})
-                return
-            data = self.rfile.read(n)
-            try:
-                with open(path, "wb") as fh:
-                    fh.write(data)
-            except OSError as ex:
-                self._send(500, {"error": str(ex)})
-                return
-            self._send(200, {"ok": True})
-            return
-        try:
-            body = json.loads(self.rfile.read(n) or b"{}")
-        except ValueError:
-            body = {}
-        if p == "/api/start":
-            self.cap.start(body.get("backend"), body.get("id"), body.get("filter", ""),
-                           body.get("baud", 38400))
-        elif p == "/api/stop":
-            self.cap.stop()
-        elif p == "/api/clear":
-            self.cap.clear()
-        elif p == "/api/autobaud":                      # find the MS/TP baud rate by listening
-            self.cap.stop()
-            self._send(200, autobaud(str(body.get("id") or "")))
-            return
-        elif p == "/api/update/install":
-            self._send(200, update_install())
-            return
-        elif p == "/api/udp/arm":                       # switch write access on (minutes) or off (0)
-            self._send(200, {"armed": RELAY.arm(body.get("minutes") or 0)})
-            return
-        elif p == "/api/udp/send":
-            try:
-                raw = bytes.fromhex(str(body.get("hex") or ""))
-            except ValueError:
-                raw = b""
-            err = RELAY.send(str(body.get("dest") or ""), raw)
-            self._send(200, {"ok": not err, "error": err})
-            return
-        elif p == "/api/send":
-            self._send(200, send_request(body))
-            return
-        elif p == "/api/session":                       # remember open tabs for the next launch
-            tabs = [{"path": str(t.get("path")), "q": str(t.get("q") or "")[:500]}
-                    for t in (body.get("tabs") or [])[:40] if isinstance(t, dict) and t.get("path")]
-            save_session({"tabs": tabs, "active": body.get("active")})
-        elif p == "/api/open":                          # another launch: add its file as a tab, show window
-            f = body.get("path")
-            if f and os.path.isfile(f) and f.lower().endswith((".pcap", ".pcapng", ".cap")):
-                self.cap.add_file(f)
-            if Handler.on_open:
-                Handler.on_open()
-        self._send(200, {"ok": True})
-
-
-def lan_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("10.255.255.255", 1))
-        return s.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
-    finally:
-        s.close()
-
-
-_WIN = {}                                         # holds the app window for the Save As dialog
-
-
-class Api:
-    """Functions the page can call when it runs inside the Windows app window."""
-
-    def pick(self, name, label, ext):
-        """Native 'Save As' dialog. Returns the chosen path, or None if cancelled."""
-        import webview
-        dlg = webview.FileDialog.SAVE if hasattr(webview, "FileDialog") else webview.SAVE_DIALOG
-        r = _WIN["w"].create_file_dialog(dlg, save_filename=name,
-                                         file_types=(f"{label} (*.{ext})", "All files (*.*)"))
-        if isinstance(r, (list, tuple)):
-            r = r[0] if r else None
-        if not r:
-            return None
-        return r if r.lower().endswith("." + ext) else r + "." + ext
-
-    def pick_open(self):
-        """Native 'Open' dialog (several files). Returns a list of paths, so the tabs can be restored next time."""
-        import webview
-        dlg = webview.FileDialog.OPEN if hasattr(webview, "FileDialog") else webview.OPEN_DIALOG
-        r = _WIN["w"].create_file_dialog(dlg, allow_multiple=True,
-                                         file_types=("Capture files (*.pcap;*.pcapng;*.cap)", "All files (*.*)"))
-        return [str(x) for x in r] if r else []
-
-    def quit(self):
-        _WIN["w"].destroy()
-
-
-def say(*a):
-    if sys.stdout:                                    # the packaged app has no console
-        print(*a)
-
-
 def state_dir():
     base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".config")
     d = os.path.join(base, "BACnetInspector")
@@ -1041,156 +815,3 @@ def save_session(update):
                 json.dump(d, f)
         except OSError:
             pass
-
-
-def forward(path):
-    """Hand a file (or just 'bring to front') to an already-running BACnet Inspector."""
-    try:
-        with open(os.path.join(state_dir(), "instance.json")) as f:
-            st = json.load(f)
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{st['port']}/api/open",
-            data=json.dumps({"path": os.path.abspath(path) if path else None}).encode(),
-            headers={"X-Token": st["token"], "Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=3) as r:
-            return r.status == 200
-    except Exception:
-        return False
-
-
-def claim_instance(path):
-    """True if this is the first instance. False if the file was handed to one that is already running.
-    The lock file makes several simultaneous launches (e.g. 'Open with' on 5 files) queue up properly."""
-    lock = os.path.join(state_dir(), "instance.lock")
-    for _ in range(50):
-        if forward(path):
-            return False
-        try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            return True
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock) > 20:     # forward() just failed: stale lock
-                    os.remove(lock)
-                    continue
-            except OSError:
-                pass
-            time.sleep(0.2)
-    return True
-
-
-def release_instance():
-    for n in ("instance.json", "instance.lock"):
-        try:
-            os.remove(os.path.join(state_dir(), n))
-        except OSError:
-            pass
-
-
-def main():
-    ap = argparse.ArgumentParser(description="Live BACnet capture with a web interface.")
-    ap.add_argument("capture", nargs="?", help="a .pcap/.pcapng file to open (also used by Windows \"Open with\")")
-    ap.add_argument("--port", type=int, default=8765, help="web server port (default 8765)")
-    ap.add_argument("--lan", action="store_true", help="allow other devices on your network (e.g. iPhone)")
-    ap.add_argument("--window", action="store_true", help="open in its own app window (needs pywebview)")
-    ap.add_argument("--browser", action="store_true", help="open in your web browser instead of an app window")
-    ap.add_argument("--no-browser", action="store_true", help="don't open anything automatically")
-    ap.add_argument("--restore", action="store_true", help="reopen the tabs from last time (always on in the app window)")
-    ap.add_argument("--new-instance", action="store_true", help="don't reuse an already-running window")
-    ap.add_argument("-i", "--interface", help="start capturing right away on this Wireshark interface number")
-    ap.add_argument("-f", "--filter", default="udp portrange 47808-47823", help="capture filter (BPF)")
-    ap.add_argument("--serial", help="start capturing MS/TP from this serial port (e.g. COM3)")
-    ap.add_argument("--baud", type=int, default=38400, help="MS/TP baud rate (default 38400)")
-    a = ap.parse_args()
-
-    packaged = getattr(sys, "frozen", False)
-    use_window = (a.window or packaged) and not (a.browser or a.no_browser)
-    single = use_window and not a.new_instance
-    if single and not claim_instance(a.capture):
-        return                                        # the running app now has the file as a new tab
-
-    cap = Capture()
-    new_file = os.path.abspath(a.capture) if a.capture and os.path.isfile(a.capture) else None
-    if single or a.restore:                           # reopen the tabs from last time
-        for t in load_session().get("tabs", []):
-            p = t.get("path")
-            if p and os.path.isfile(p) and os.path.abspath(p) != new_file:
-                cap.add_file(p)
-    if new_file:
-        cap.add_file(new_file)
-    Handler.cap, Handler.token = cap, secrets.token_urlsafe(16)
-    host = "0.0.0.0" if a.lan else "127.0.0.1"
-    try:
-        srv = ThreadingHTTPServer((host, a.port), Handler)
-    except OSError:                                   # port busy: let the OS pick one
-        srv = ThreadingHTTPServer((host, 0), Handler)
-    port = srv.server_address[1]
-    url = f"http://127.0.0.1:{port}/?t={Handler.token}"
-    say("BACnet live capture is running.\n  On this PC:  " + url)
-    if a.lan:
-        say(f"  iPhone/iPad (same Wi-Fi):  http://{lan_ip()}:{port}/?t={Handler.token}")
-    say("Press Ctrl+C to stop.")
-    if a.interface:
-        cap.start("dumpcap", a.interface, a.filter)
-    elif a.serial:
-        cap.start("serial", a.serial, "", a.baud)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    if single:
-        with open(os.path.join(state_dir(), "instance.json"), "w") as f:
-            json.dump({"port": port, "token": Handler.token, "pid": os.getpid()}, f)
-
-    try:
-        if use_window:
-            try:
-                import webview
-                try:
-                    webview.settings["ALLOW_DOWNLOADS"] = True     # lets the Save button work
-                except Exception:
-                    pass
-                ss = load_session()
-                ww = min(7680, max(700, int(ss.get("w") or 1300)))
-                wh = min(4320, max(450, int(ss.get("h") or 820)))
-                win = webview.create_window("BACnet Inspector", url, width=ww, height=wh, js_api=Api())
-                _WIN["w"] = win
-                _tm = {}
-
-                def on_resize(w, h):                          # remember the window size (saved once resizing stops)
-                    if _tm.get("t"):
-                        _tm["t"].cancel()
-                    _tm["t"] = threading.Timer(0.8, save_session, ({"w": int(w), "h": int(h)},))
-                    _tm["t"].start()
-                try:
-                    win.events.resized += on_resize
-                except Exception:
-                    pass
-
-                def to_front():
-                    try:
-                        win.restore()
-                        win.on_top = True
-                        win.on_top = False
-                    except Exception:
-                        pass
-                Handler.on_open = staticmethod(to_front)
-                try:                                              # keep names, notes and settings between launches
-                    webview.start(private_mode=False, storage_path=os.path.join(state_dir(), "webview"))
-                except TypeError:
-                    webview.start()                               # older pywebview
-                return
-            except Exception as ex:
-                say(f"App window unavailable ({ex}); opening your browser instead.")
-        if not a.no_browser:
-            webbrowser.open(url)
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        cap.stop()
-        srv.shutdown()
-        if single:
-            release_instance()
-
-
-if __name__ == "__main__":
-    main()

@@ -1,1 +1,1 @@
-https://github.com/YOUR-NAME/YOUR-REPO/releases/latest/download/update.json
+https://github.com/jesssantos1992-cloud/Bacnet-Builds/releases/latest/download/update.json
