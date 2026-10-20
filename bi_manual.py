@@ -96,7 +96,6 @@ working with the live network. {k('Ctrl+5')} opens Discover; {k('Ctrl+1')} goes 
 <tr><td><b>Back arrow</b></td><td>Top left. Goes back to the page you were on before. {k('Alt+Left')} or the Back
 button on your mouse do the same.</td></tr>
 <tr><td><b>Search</b></td><td>Top right. Jump to anything by typing ({k('Ctrl+K')}). See {go('palette', 'Search everything')}.</td></tr>
-<tr><td><b>PuTTY</b></td><td>Top right. Opens the PuTTY terminal. See {go('putty', 'PuTTY')}.</td></tr>
 <tr><td><b>Sidebar</b></td><td>The pages that analyse the open capture, grouped under Analyze, Network, MS/TP and
 Tools. A number next to Findings or Devices shows how many there are.</td></tr>
 <tr><td><b>Tabs</b></td><td>One tab per open capture, plus the <b>Live capture</b> tab. Drag a tab to reorder it;
@@ -487,7 +486,7 @@ because masters poll free addresses one at a time). The status line shows when i
 <li>Press <b>Leave trunk</b> when you are done – this also frees the COM port.</li>
 </ol>
 <ul>
-<li>Only one program can use a COM port at a time: stop a live serial capture (or close PuTTY) before joining, and
+<li>Only one program can use a COM port at a time: stop a live serial capture (or close any terminal program) before joining, and
 leave the trunk before capturing.</li>
 <li>If the PC's MAC turns out to be in use by a device, the app stops and tells you – press Find a free MAC again.</li>
 <li>Every frame the PC sends and receives also appears in the Live capture tab.</li>
@@ -601,13 +600,6 @@ ch('palette', 'Search everything (Ctrl+K)', 'Everyday tools', f"""
 words: “sat sp” finds “SAT Setpoint”.</p>
 """)
 
-ch('putty', 'PuTTY', 'Everyday tools', """
-<p>PuTTY 0.85 is included, for SSH, Telnet and serial console sessions to routers, switches and controllers. Click
-<b>PuTTY</b> at the top right or use Tools &gt; PuTTY. It opens in its own window.</p>
-<p>A COM port can only be used by one program at a time: if the live capture or Discover is using the adapter, stop it
-first. Tools &gt; PuTTY help opens PuTTY's own manual.</p>
-""")
-
 ch('settings', 'Appearance, tips and the tour', 'Everyday tools', f"""
 <h3>Light and dark</h3>
 <p>View &gt; Theme: <b>automatic</b> follows Windows, or choose <b>light</b> or <b>dark</b>.</p>
@@ -684,7 +676,7 @@ BACnet router, to see traffic between other devices.</li>
 <li>Press <b>Detect</b> to find the baud rate.</li>
 <li>Swap the A and B wires.</li>
 <li>Check the trunk devices are powered and the adapter is on the right trunk.</li>
-<li>“Port in use” – close PuTTY or any other program using the COM port, stop the live capture, or leave the trunk in
+<li>“Port in use” – close any other program using the COM port, stop the live capture, or leave the trunk in
 Discover.</li>
 </ul>
 <h3>Scan finds no devices (BACnet/IP)</h3>
@@ -761,7 +753,6 @@ and can capture straight from an MS/TP trunk.</p>
 changed in each release. See {go('updates', 'Updates')} for how new versions arrive.</p>
 <h3>Credits</h3>
 <ul>
-<li>PuTTY 0.85 – MIT licence, © Simon Tatham.</li>
 <li>Qt and PySide6 – LGPL v3.</li>
 </ul>
 """)

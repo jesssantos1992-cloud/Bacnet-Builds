@@ -17,7 +17,6 @@
 - Fixed: on smaller screens the packet list's Info column was pushed off screen, and some pages were cut off on the right.
 - Fixed: in light mode the unselected Capture / Discover switch was hard to read; checkboxes after a theme change.
 - MS/TP trunk: clearer message when a capture has no token passing in it.
-- PuTTY is now included: Tools > PuTTY opens it for SSH, Telnet or a serial console.
 - Discover over MS/TP: choose Connection: MS/TP, pick your USB RS-485 adapter, press Join trunk. The PC listens first, picks a free MAC address, joins the token ring and can scan and read points directly on the trunk (no router needed).
 - Excel export: every Save / Export menu now offers an Excel (.xlsx) version next to CSV.
 - Discover: Active alarms button on a device lists points in alarm (state, acknowledged, type).
@@ -25,4 +24,4 @@
 - While Discover is joined to an MS/TP trunk, its frames show in the Live capture tab so you can see the traffic.
 - Sorting a very large capture no longer freezes the window, and re-sorting is much faster.
 - Smaller download: unused parts of Qt are no longer included.
-- PuTTY button next to Capture / Discover at the top opens PuTTY in its own window.
+- The About window and the manual now credit the author, Jesse Santos.

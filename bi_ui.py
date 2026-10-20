@@ -884,7 +884,7 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
     v.addLayout(br)
     v.addSpacing(14)
     cr = label(f'© {time.localtime().tm_year} {AUTHOR}. All rights reserved.\n'
-               'Includes PuTTY 0.85 (MIT licence, © Simon Tatham) and Qt / PySide6 (LGPL v3).\n'
+               'Built with Qt / PySide6 (LGPL v3).\n'
                'Everything you open stays on your computer.', muted=True)
     f = cr.font()
     f.setPointSizeF(BODY_PT - 1)
