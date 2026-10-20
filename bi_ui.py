@@ -10,7 +10,7 @@ import os
 import sys
 import time
 
-from PySide6.QtCore import (QByteArray, QEasingCurve, QEvent, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt,
+from PySide6.QtCore import (QByteArray, QEasingCurve, QEvent, QObject, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt,
                             QTimer, QVariantAnimation)
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen,
                            QPixmap, QPolygonF)
@@ -893,6 +893,109 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
     v.addWidget(cr)
     d.setFixedWidth(520)
     d.exec()
+
+
+# ----------------------------------------------------------- galactic cursor --
+def galaxy_cursor():
+    """An arrow filled with a nebula, sprinkled with stars, with a soft cosmic glow and a sparkle at the tip."""
+    from PySide6.QtGui import QCursor, QRadialGradient
+    import random
+    S, R = 34, 3                                    # logical size, drawn at 3x so it stays sharp on any screen
+    pm = QPixmap(S * R, S * R)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(R, R)
+    tip = QPointF(4, 4)
+    arrow = QPainterPath()
+    arrow.addPolygon(QPolygonF([QPointF(x, y) for x, y in
+                                ((4, 4), (4, 25.5), (9.2, 20.6), (13, 29.2), (16.6, 27.6), (12.9, 19.3), (20, 19.3))]))
+    arrow.closeSubpath()
+    for w, a in ((5.5, 30), (3.5, 55), (2.0, 90)):  # outer glow: violet fading into space
+        p.setPen(QPen(QColor(150, 90, 255, a), w, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        p.drawPath(arrow)
+    neb = QRadialGradient(QPointF(9, 15), 16)       # nebula: hot magenta core, violet, deep space blue
+    neb.setColorAt(0.0, QColor('#ff5ec4'))
+    neb.setColorAt(0.35, QColor('#9b4dff'))
+    neb.setColorAt(0.7, QColor('#3a2fbf'))
+    neb.setColorAt(1.0, QColor('#0b0f3a'))
+    p.fillPath(arrow, neb)
+    p.save()
+    p.setClipPath(arrow)
+    cloud = QRadialGradient(QPointF(13, 23), 7)     # a wisp of cyan gas
+    cloud.setColorAt(0, QColor(80, 220, 255, 150))
+    cloud.setColorAt(1, QColor(80, 220, 255, 0))
+    p.fillRect(QRectF(0, 0, S, S), cloud)
+    rnd = random.Random(7)                           # the same starfield every time
+    p.setPen(Qt.PenStyle.NoPen)
+    for _ in range(16):
+        x, y = rnd.uniform(4, 18), rnd.uniform(6, 28)
+        r = rnd.choice((0.35, 0.45, 0.6, 0.8))
+        p.setBrush(QColor(255, 255, 255, rnd.randint(150, 255)))
+        p.drawEllipse(QPointF(x, y), r, r)
+    p.restore()
+    p.setPen(QPen(QColor(255, 255, 255, 235), 0.9, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawPath(arrow)
+    glow = QRadialGradient(tip, 4.5)                 # the star at the tip (where the click lands)
+    glow.setColorAt(0, QColor(255, 255, 255, 255))
+    glow.setColorAt(0.3, QColor(190, 230, 255, 200))
+    glow.setColorAt(1, QColor(120, 160, 255, 0))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(glow)
+    p.drawEllipse(tip, 4.5, 4.5)
+    spark = QPainterPath()
+    for dx, dy in ((0, -4), (0.7, -0.7), (4, 0), (0.7, 0.7), (0, 4), (-0.7, 0.7), (-4, 0), (-0.7, -0.7)):
+        pt = QPointF(tip.x() + dx, tip.y() + dy)
+        spark.lineTo(pt) if spark.elementCount() else spark.moveTo(pt)
+    spark.closeSubpath()
+    p.fillPath(spark, QColor(255, 255, 255))
+    p.end()
+    pm.setDevicePixelRatio(R)
+    return QCursor(pm, int(tip.x()), int(tip.y()))
+
+
+class _CursorKeeper(QObject):
+    """Gives every window the galactic cursor, and replaces the plain arrow wherever a widget asks for one.
+    Text boxes keep their I-beam, splitters their resize arrows, links their hand."""
+    def __init__(self, cur):
+        super().__init__()
+        self.cur = cur
+
+    def eventFilter(self, o, e):
+        t = e.type()
+        if t == QEvent.Type.Show and isinstance(o, QWidget) and o.isWindow() and plain(o):
+            o.setCursor(self.cur)
+        elif t == QEvent.Type.CursorChange and isinstance(o, QWidget) and o.testAttribute(Qt.WidgetAttribute.WA_SetCursor) \
+                and o.cursor().shape() == Qt.CursorShape.ArrowCursor:
+            o.setCursor(self.cur)
+        return False
+
+
+_keeper = None
+
+
+def plain(w):
+    """No cursor of its own, or just the ordinary arrow (a window keeps that flag even after unsetCursor)."""
+    return not w.testAttribute(Qt.WidgetAttribute.WA_SetCursor) or w.cursor().shape() == Qt.CursorShape.ArrowCursor
+
+
+def set_galaxy_cursor(on):
+    """Turn the galactic cursor on or off for the whole app."""
+    global _keeper
+    app = QApplication.instance()
+    if on and not _keeper:
+        _keeper = _CursorKeeper(galaxy_cursor())
+        app.installEventFilter(_keeper)
+        for w in app.topLevelWidgets():
+            if w.isVisible() and plain(w):
+                w.setCursor(_keeper.cur)
+    elif not on and _keeper:
+        app.removeEventFilter(_keeper)
+        for w in app.allWidgets():
+            if w.testAttribute(Qt.WidgetAttribute.WA_SetCursor) and w.cursor().shape() == Qt.CursorShape.BitmapCursor:
+                w.unsetCursor()
+        _keeper = None
 
 
 # ------------------------------------------------------------- keyboard keys --

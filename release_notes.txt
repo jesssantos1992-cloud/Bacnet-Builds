@@ -27,4 +27,5 @@
 - The About window and the manual now credit the author, Jesse Santos.
 - Site inventory: Discover > Site inventory… reads every device's details and object list and saves an Excel workbook with one row per device (vendor, model, firmware, address, and counts of AI/AO/AV/BI/BO/BV, multi-state, trend logs, schedules and more).
 - Discover through a BBMD: the result of the foreign-device registration is now shown (accepted, refused or no answer), and a BBMD on a port other than 47808 can be entered as address:port.
+- A galactic mouse pointer inside the app: a nebula arrow with stars and a glowing star at the tip (View > Galactic cursor turns it off).
 - Help > Report a problem…: unexpected errors are written to a problem log instead of going unnoticed, with Copy details and Open log folder buttons.

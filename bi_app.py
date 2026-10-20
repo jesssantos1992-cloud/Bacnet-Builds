@@ -1138,6 +1138,10 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         for t, v in [('Theme: automatic', ''), ('Theme: light', 'light'), ('Theme: dark', 'dark')]:
             act(m, t, lambda _=False, v=v: self.set_theme(v))
+        self.m_galaxy = QAction('Galactic cursor', self, checkable=True)
+        self.m_galaxy.setChecked(self.store.get('bi_galaxy', True))
+        self.m_galaxy.toggled.connect(self.set_galaxy)
+        m.addAction(self.m_galaxy)
         m.addSeparator()
         act(m, 'Reset pane size', self.reset_panes)
         m.addSeparator()
@@ -2171,6 +2175,11 @@ class MainWindow(QMainWindow):
         """A short message at the bottom of the window (with an optional action such as Undo)."""
         self.toaster.show_msg(m, action, action_text)
 
+    def set_galaxy(self, on):
+        self.store.set('bi_galaxy', bool(on))
+        U.set_galaxy_cursor(on)
+        self.toast('Galactic cursor ' + ('on' if on else 'off'))
+
     def set_theme(self, v):
         self.store.set('bi_theme', v)
         apply_theme(v)
@@ -2600,6 +2609,7 @@ def main():
     except AttributeError:
         pass
     w.open_first = path
+    U.set_galaxy_cursor(store.get('bi_galaxy', True))
     bi_log.on_error = lambda s: w.bridge.call.emit(
         lambda: w.toast('Something went wrong – it was saved to the problem log', w.report_problem, 'Details'))
     srv = QLocalServer()

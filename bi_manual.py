@@ -619,6 +619,10 @@ words: “sat sp” finds “SAT Setpoint”.</p>
 ch('settings', 'Appearance, tips and the tour', 'Everyday tools', f"""
 <h3>Light and dark</h3>
 <p>View &gt; Theme: <b>automatic</b> follows Windows, or choose <b>light</b> or <b>dark</b>.</p>
+<h3>Galactic cursor</h3>
+<p>Inside the app the mouse pointer is a small galaxy: a nebula-filled arrow with stars and a bright star at the tip
+(the tip is exactly where you click). Text boxes still show the normal text cursor and dividers their resize arrows.
+View &gt; <b>Galactic cursor</b> switches back to the standard Windows pointer.</p>
 <h3>Tips</h3>
 <p>As you work, small tips point out shortcuts and quicker ways – for example the keyboard shortcut for something you
 just clicked. Each tip appears only once. Press <b>Got it</b> to close one or <b>Turn off tips</b> to stop them. Help

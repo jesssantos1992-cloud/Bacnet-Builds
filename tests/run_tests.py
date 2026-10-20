@@ -49,6 +49,7 @@ def main():
              ('site inventory', [py, 'inventory_test.py'], False),
              ('navigation and Back', [py, 'nav_test.py'], False),
              ('problem log and Report a problem', [py, 'log_test.py'], False),
+             ('galactic cursor', [py, 'cursor_test.py'], False),
              ('smoke: every view and export', [py, 'smoke.py'] + caps, True),
              ('QA: every view, both themes, two sizes', [py, 'qa.py'] + caps, True),
              ('alarms, properties, Excel, sorting', [py, 'features_test.py'] + (caps[:1] + caps[-1:] if caps else []), True)]
