@@ -1172,11 +1172,14 @@ class MainWindow(QMainWindow):
         act(m, 'PuTTY licence', lambda: self.open_putty_file('LICENCE'))
         m = mb.addMenu('&Help')
         self.help_menu = m
+        act(m, 'User manual', lambda: self.manual(), 'F1')
         act(m, 'Take the tour', self.tour)
-        act(m, 'Getting started', lambda: self.help('start'), 'F1')
-        act(m, 'Display filter reference', lambda: self.help('filter'))
-        act(m, 'Everyday BMS tools', lambda: self.help('bms'))
-        act(m, 'Keyboard shortcuts', lambda: self.help('keys'))
+        m.addSeparator()
+        act(m, 'Quick start', lambda: self.manual('quick'))
+        act(m, 'Display filter reference', lambda: self.manual('filter'))
+        act(m, 'Discover and reading points', lambda: self.manual('discover'))
+        act(m, 'Keyboard shortcuts', lambda: self.manual('keys'))
+        act(m, 'Troubleshooting', lambda: self.manual('trouble'))
         m.addSeparator()
         act(m, 'Search everything…', self.command_palette)
         m.addSeparator()
@@ -2396,8 +2399,8 @@ class MainWindow(QMainWindow):
             (self.mode_putty, 'PuTTY is built in',
              'Open an SSH, Telnet or serial console session without leaving the app.', ''),
             (help_rect, 'Help is always here',
-             'Getting started, the filter reference, keyboard shortcuts and this tour are in the Help menu. Small tips '
-             'also pop up as you work – you can turn them off there.', 'F1'),
+             'The user manual explains every part of the app – press F1 on any page to open it at that page. The '
+             'tour and the tips settings are here too.', 'F1'),
             (None, 'You’re all set',
              'Open a capture or start the live capture to begin. You can take this tour again any time from Help.', ''),
         ]
@@ -2426,7 +2429,24 @@ class MainWindow(QMainWindow):
         self.pk.bot.setSizes([600, 420])
         self.store.set('bi_split', None)
 
+    def manual(self, cid=None):
+        """The user manual; without a chapter it opens at the page for what is on screen."""
+        import bi_manual
+        if cid is None:
+            cid = 'filter' if self.qbox.hasFocus() else bi_manual.FOR_VIEW.get(self.cur_view, 'welcome')
+            if self.cur_view == 'x' and self.explorer.mode == 'mstp':
+                cid = 'dmstp'
+            elif self.cur_view == 'p' and self.ac and self.ac.live:
+                cid = 'live'
+        w = getattr(self, '_manual', None)
+        if w is None:
+            w = self._manual = bi_manual.ManualWindow(self)
+        w.tb.document().setDefaultStyleSheet(bi_manual.css())
+        w.open_at(cid)
+
     def help(self, w):
+        if w in ('start', 'filter', 'bms', 'keys'):
+            return self.manual({'start': 'quick', 'filter': 'filter', 'bms': 'discover', 'keys': 'keys'}[w])
         from bi_views import HELP
         t, body = HELP[w]
         body = body.replace('{ver}', BL.APP_VERSION)

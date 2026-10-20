@@ -1,3 +1,4 @@
+- New user manual (Help > User manual, or F1): every part of the app explained step by step, with search, troubleshooting, a BACnet glossary and all keyboard shortcuts. F1 opens it at the page you are on, and it can be saved as a web page to print.
 - New here? A short guided tour shows you around the first time you open the app (Help > Take the tour to see it again).
 - Tips pop up once as you work, pointing out shortcuts and quicker ways (Help > Show tips to turn them on or off).
 - A new, cleaner look: a calmer sidebar with line icons, a sliding Capture / Discover switch, one accent colour, softer cards, roomier rows and the title bar now blends into the window.
