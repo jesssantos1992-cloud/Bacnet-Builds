@@ -2009,6 +2009,7 @@ HELP = {
              '<tr><td>F1</td><td>Help</td></tr></table>'),
     'about': ('About BACnet Inspector', '<p><b>BACnet Inspector</b> {ver}<br>Reads BACnet/IP and BACnet MS/TP captures, explains what is on the '
               'network in plain English, and points out problems such as duplicate device IDs and duplicate network numbers.</p>'
+              '<p>Designed and programmed by <b>{author}</b>.</p>'
               '<p>Everything stays on your computer.</p>')}
 
 

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QD
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy,
                                QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
-from bi_common import colors, is_dark, label
+from bi_common import AUTHOR, colors, is_dark, label
 
 # ------------------------------------------------------------------ fonts --
 BODY_PT = 10
@@ -862,6 +862,11 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
               label('Capture analysis for BACnet/IP and MS/TP, with device discovery and live reads.', muted=True)):
         w.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(w)
+    v.addSpacing(10)
+    by = label(f'Designed and programmed by <b>{AUTHOR}</b>')
+    by.setTextFormat(Qt.TextFormat.RichText)
+    by.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    v.addWidget(by)
     v.addSpacing(14)
     br = QHBoxLayout()
     br.addStretch(1)
@@ -878,7 +883,8 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
     br.addStretch(1)
     v.addLayout(br)
     v.addSpacing(14)
-    cr = label('Includes PuTTY 0.85 (MIT licence, © Simon Tatham) and Qt / PySide6 (LGPL v3).\n'
+    cr = label(f'© {time.localtime().tm_year} {AUTHOR}. All rights reserved.\n'
+               'Includes PuTTY 0.85 (MIT licence, © Simon Tatham) and Qt / PySide6 (LGPL v3).\n'
                'Everything you open stays on your computer.', muted=True)
     f = cr.font()
     f.setPointSizeF(BODY_PT - 1)

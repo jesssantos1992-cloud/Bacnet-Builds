@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 import bacnet_live as BL
 import bi_core as C
 import bi_ui as U
-from bi_common import (HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
+from bi_common import (AUTHOR, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
                        label, semibold, stamp)
 from bi_store import Store
 
@@ -2449,7 +2449,7 @@ class MainWindow(QMainWindow):
             return self.manual({'start': 'quick', 'filter': 'filter', 'bms': 'discover', 'keys': 'keys'}[w])
         from bi_views import HELP
         t, body = HELP[w]
-        body = body.replace('{ver}', BL.APP_VERSION)
+        body = body.replace('{ver}', BL.APP_VERSION).replace('{author}', AUTHOR)
         d = QDialog(self)
         d.setWindowTitle(t)
         v = QVBoxLayout(d)

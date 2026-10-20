@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLay
                                QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem,
                                QToolTip, QVBoxLayout, QWidget)
 
+AUTHOR = 'Jesse Santos'        # shown in Help > About, the manual and the About help page
 MONO = 'Cascadia Mono, Consolas, monospace'
 ROW_H = 28                     # tree and table row height
 # type scale (points): display numbers, page titles, section headings; body text is the app font (10 pt)

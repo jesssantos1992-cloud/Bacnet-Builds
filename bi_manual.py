@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QHBoxLayout, QLineE
                                QPushButton, QSplitter, QTextBrowser, QVBoxLayout, QWidget)
 
 import bi_ui as U
-from bi_common import colors, is_dark, label
+from bi_common import AUTHOR, colors, is_dark, label
 
 
 def k(keys):
@@ -752,6 +752,20 @@ and stops if it detects that its address is already in use.</li>
 </ul>
 """)
 
+ch('about', 'About this program', 'Reference', f"""
+<p><b>BACnet Inspector</b> was designed and programmed by <b>{AUTHOR}</b>.</p>
+<p>It reads BACnet/IP and BACnet MS/TP captures, explains what is on the network in plain English, points out
+problems such as duplicate device IDs and duplicate network numbers, discovers devices and reads their points live,
+and can capture straight from an MS/TP trunk.</p>
+<p>Help &gt; <b>About BACnet Inspector</b> shows the version you have, and Help &gt; <b>What's new</b> lists what
+changed in each release. See {go('updates', 'Updates')} for how new versions arrive.</p>
+<h3>Credits</h3>
+<ul>
+<li>PuTTY 0.85 – MIT licence, © Simon Tatham.</li>
+<li>Qt and PySide6 – LGPL v3.</li>
+</ul>
+""")
+
 # where F1 opens the manual for each view
 FOR_VIEW = {'p': 'packets', 'f': 'findings', 'd': 'devices', 'w': 'changes', 't': 'traffic', 's': 'response',
             'o': 'online', 'g': 'map', 'a': 'ids', 'n': 'ids', 'm': 'mstp', 'b': 'mstp', 'c': 'compare', 'x': 'discover'}
@@ -794,7 +808,7 @@ def full_html():
             'kbd{border:1px solid #c7c7cc;border-bottom-width:2px;border-radius:5px;padding:0 6px;background:#fff;font:600 13px "Segoe UI"}'
             '.note{background:#eef4ff;border-radius:10px;margin:14px 0}.part{color:#6e6e73;font-size:12px;font-weight:600;letter-spacing:.05em}'
             'td{vertical-align:top}hr{border:0;border-top:1px solid #e3e3e8;margin:30px 0}'
-            f'</style></head><body><h1>BACnet Inspector – User manual</h1><ol>{toc}</ol><hr>{body}</body></html>')
+            f'</style></head><body><h1>BACnet Inspector – User manual</h1><p class="part">BY {AUTHOR.upper()}</p><ol>{toc}</ol><hr>{body}</body></html>')
 
 
 # ------------------------------------------------------------------ window --
