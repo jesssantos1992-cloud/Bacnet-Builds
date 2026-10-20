@@ -8,9 +8,10 @@ import html
 import re
 import time
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPainter, QPalette, QPen, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QSizePolicy,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QLayout,
+                               QSizePolicy,
                                QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem,
                                QToolTip, QVBoxLayout, QWidget)
 
@@ -325,18 +326,81 @@ class Pill(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
 
-def summary_row(title, pills):
-    """'Title  [pill] [pill]' line at the top of a view."""
+class FlowLayout(QLayout):
+    """Lays widgets out left to right and wraps onto a new line when the row is full."""
+
+    def __init__(self, parent=None, hspace=8, vspace=6):
+        super().__init__(parent)
+        self.items = []
+        self.hs, self.vs = hspace, vspace
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self.items.append(item)
+
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, i):
+        return self.items[i] if 0 <= i < len(self.items) else None
+
+    def takeAt(self, i):
+        return self.items.pop(i) if 0 <= i < len(self.items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return self._do(QRect(0, 0, w, 0), True)
+
+    def setGeometry(self, r):
+        super().setGeometry(r)
+        self._do(r, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        s = QSize()
+        for it in self.items:
+            s = s.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return s + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do(self, r, test):
+        m = self.contentsMargins()
+        x, y, line = r.x() + m.left(), r.y() + m.top(), 0
+        right = r.right() - m.right()
+        for it in self.items:
+            sz = it.sizeHint()
+            if x + sz.width() > right and line > 0:
+                x = r.x() + m.left()
+                y += line + self.vs
+                line = 0
+            if not test:
+                it.setGeometry(QRect(QPoint(x, y), sz))
+            x += sz.width() + self.hs
+            line = max(line, sz.height())
+        return y + line - r.y() + m.bottom()
+
+
+def flow_row(widgets, hspace=8, vspace=6):
+    """A row of widgets that wraps when the window is narrow."""
     w = QWidget()
-    lay = QHBoxLayout(w)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(8)
-    t = label(title, bold=True, size=13, wrap=False)
-    lay.addWidget(t)
-    for text, sev in pills:
-        lay.addWidget(Pill(text, sev))
-    lay.addStretch(1)
+    lay = FlowLayout(w, hspace, vspace)
+    for x in widgets:
+        lay.addWidget(x)
+    w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
     return w
+
+
+def summary_row(title, pills, extra=()):
+    """'Title  [pill] [pill]' line at the top of a view (wraps on narrow windows)."""
+    t = label(title, bold=True, size=13, wrap=False)
+    return flow_row(([t] if title else []) + [Pill(text, sev) for text, sev in pills] + list(extra))
 
 
 def hline():

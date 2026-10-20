@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
-from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, colors_light, csv_text, doc, esc, heading, html_table, is_dark,
+from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, flow_row, colors_light, csv_text, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
 
 VN = C.VN
@@ -115,6 +115,8 @@ def findings_html(win, F, for_export=False):
         if not cnt.get(k):
             return ''
         col = {'SERIOUS': c['se'], 'WARNING': c['wa'], 'NOTE': c['no']}[k]
+        if l != 'serious' and cnt[k] == 1:
+            l = l[:-1]                                    # 1 warning, 1 note
         return f' &nbsp;<span style="color:{col};font-weight:600">● {cnt[k]} {l}</span>'
     h = [f'<p style="font-size:15pt;margin:0 0 16px 0"><b>{head}</b>{pill("SERIOUS", "serious")}{pill("WARNING", "warnings")}{pill("NOTE", "notes")}</p>']
     lb = lambda t: f'<p style="margin:12px 0 4px 0;font-size:8pt;color:{c["mu"]}"><b>{t}</b></p>'  # noqa: E731
@@ -657,18 +659,16 @@ class OnlineView(PageView):
                    'seconds). A device that was active and then stopped is silent. ' +
                    ('This updates live.' if live else 'For a saved capture, “silent” means it stopped talking before the end of the capture.')))
         box = QWidget()
-        bl = QHBoxLayout(box)
-        bl.setContentsMargins(0, 4, 0, 0)
-        bl.addWidget(label('Alert me when', bold=True, wrap=False))
         cfg = win.watch_cfg()
+        boxes = [label('Alert me when', bold=True, wrap=False)]
         for k, t in [('dev', 'a new device appears'), ('sil', 'a device goes silent'), ('prob', 'a new problem is found'),
                      ('busy', 'a router says it is busy'), ('snd', 'play a sound'), ('ntf', 'desktop notification')]:
             cb = QCheckBox(t)
             cb.setChecked(bool(cfg[k]))
             cb.toggled.connect(lambda on, k=k: self.set_cfg(k, on))
-            bl.addWidget(cb)
-        bl.addStretch(1)
-        p.add(box)
+            boxes.append(cb)
+        box.deleteLater()
+        p.add(flow_row(boxes, 14, 4))
         p.add(hint('Alerts work while a live capture is running (the first 15 seconds only learn what is on the network).'))
         if win.ALR:
             p.add(heading('Alerts'))
@@ -995,19 +995,20 @@ def list_box(text, copy_fn, toast):
 
 
 def legend_row(items):
-    w = QWidget()
-    lay = QHBoxLayout(w)
-    lay.setContentsMargins(10, 6, 10, 6)
-    lay.setSpacing(18)
+    """'square + explanation' items in a box; wraps onto more lines on narrow windows."""
+    parts = []
     for txt, st, expl in items:
-        sub = QHBoxLayout()
+        it = QWidget()
+        sub = QHBoxLayout(it)
+        sub.setContentsMargins(0, 0, 0, 0)
         sub.setSpacing(6)
         g = CellGrid([(txt, st, '')], cols=1, cell_w=30)
         g.setFixedSize(30, 24)
         sub.addWidget(g)
         sub.addWidget(label(expl, wrap=False, muted=True))
-        lay.addLayout(sub)
-    lay.addStretch(1)
+        parts.append(it)
+    w = flow_row(parts, 18, 6)
+    w.layout().setContentsMargins(10, 6, 10, 6)
     w.setObjectName('leg')
     w.setStyleSheet(f"QWidget#leg{{border:1px solid {colors()['bd']};border-radius:8px}}")
     return w
@@ -1439,7 +1440,8 @@ class MstpView(PageView):
         for t in T:
             nm = f"Trunk (capture interface {t['ifc'] + 1})" if len(T) > 1 else 'Trunk'
             dur = max(1, t['t1'] - t['t0'])
-            pills = [(C.pl(len(t['masters']), 'master'), 'NOTE'), (f"highest master: MAC {t['hi']}", 'NOTE')]
+            pills = ([(C.pl(len(t['masters']), 'master'), 'NOTE'), (f"highest master: MAC {t['hi']}", 'NOTE')] if t['masters']
+                     else [('no token passing seen', 'WARNING')])
             if t['rot']:
                 pills.append((f"token lap {C.jsround(t['rot'] * 1000)} ms" if t['rot'] < 1 else f"token lap {C.tofixed(t['rot'], 2)} s",
                               'WARNING' if t['rot'] >= 1 else 'NOTE'))
@@ -1461,7 +1463,11 @@ class MstpView(PageView):
             sl = sorted(m for m in t['st'] if m > 127 and t['st'][m] == 'slave')
             if sl:
                 p.add(hint('Slaves above MAC 127: ' + ', '.join(map(str, sl))))
-            if t['pfmMax'] > t['hi'] and t['pfmTotal']:
+            if not t['masters']:
+                msg = ('No Token or Poll-For-Master frames were captured, so the masters (and the Max Master setting) cannot be '
+                       'worked out. The capture probably only recorded data frames – for example a router’s own capture of '
+                       'the trunk. Capture the trunk with a USB RS-485 adapter (Live capture) to see the token.')
+            elif t['pfmMax'] > t['hi'] and t['pfmTotal']:
                 msg = (f"Masters poll as far as MAC {t['pfmMax']} but the highest device is MAC {t['hi']}. " +
                        (f"Set Max Master = {t['hi']} on every master to stop {C.jsround(100 * t['waste'] / t['pfmTotal'])}% of the polling being wasted."
                         if t['waste'] and t['waste'] / t['pfmTotal'] >= .2 else 'That is a small amount of wasted polling.'))

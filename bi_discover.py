@@ -157,7 +157,7 @@ class DiscoverView(QWidget):
         g.setExclusive(True)
         for b in (self.m_ip, self.m_ms):
             g.addButton(b)
-            b.setStyleSheet('QToolButton{border:0;border-radius:6px;padding:4px 16px;font-weight:600}'
+            b.setStyleSheet('QToolButton{border:0;border-radius:6px;padding:4px 16px;font-weight:600;color:palette(window-text)}'
                             'QToolButton:checked{background:#0b8f83;color:white}')
             sl.addWidget(b)
         (self.m_ms if self.ex.mode == 'mstp' else self.m_ip).setChecked(True)
@@ -388,6 +388,15 @@ class DiscoverView(QWidget):
         c = d['cap']
         return bool(c) and (str(c['key']).startswith('MS/TP MAC') or str(c.get('gw') or '').startswith('MS/TP MAC'))
 
+    def other_mode_hint(self):
+        """When the capture's devices all belong to the other connection, say so (instead of 'no devices')."""
+        ms = self.ex.mode == 'mstp'
+        n = sum(1 for d in self.sd_devs() if d['cap'] and self.is_ms(d) != ms)
+        if not n:
+            return ''
+        return (f"The {n} device{'' if n == 1 else 's'} in this capture {'are' if n > 1 else 'is'} on "
+                + ('BACnet/IP – switch Connection to BACnet/IP.' if ms else 'an MS/TP trunk – switch Connection to MS/TP.'))
+
     def all_devs(self):
         """The devices for the chosen connection (BACnet/IP or MS/TP), sorted by network and ID."""
         ms = self.ex.mode == 'mstp'
@@ -541,7 +550,7 @@ class DiscoverView(QWidget):
                         it.setDisabled(True)
                 g.setExpanded(gk in self.gopen or bool(q))
             if not groups:
-                QTreeWidgetItem(tr, ['No devices in the capture yet.']).setForeground(0, mu)
+                QTreeWidgetItem(tr, [self.other_mode_hint() or 'No devices in the capture yet.']).setForeground(0, mu)
         else:
             groups = {}
             for d in D:
@@ -766,7 +775,7 @@ class DiscoverView(QWidget):
             cards.addWidget(b)
         card('Use devices from the capture',
              f"{len(cap)} device{'' if len(cap) == 1 else 's'} seen in the capture you have open" if cap else
-             'No devices in the open capture yet – start or open a capture first',
+             self.other_mode_hint() or 'No devices in the open capture yet – start or open a capture first',
              self.pick_capture, bool(pk and pk['src'] == 'cap'), not run)
         ms = self.ex.mode == 'mstp'
         card('Stop scan' if self.ex.busy == 'scan' else 'Scan the MS/TP trunk' if ms else 'Scan the network',

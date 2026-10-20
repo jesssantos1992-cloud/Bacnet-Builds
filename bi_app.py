@@ -276,8 +276,11 @@ class PacketsPane(QWidget):
         hh.setSectionsClickable(True)
         hh.setHighlightSections(False)
         hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        for i, w in enumerate([70, 90, 290, 220, 180, 90, 50]):
-            self.tv.setColumnWidth(i, w)
+        self._auto_cols = True               # share the width out until the user drags a column
+        self._sizing = False
+        self.tv.installEventFilter(self)
+        hh.sectionResized.connect(self._col_dragged)
+        self.fit_columns()
         self.tv.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.hl = HighlightDelegate(self.tv)            # colour IPs, MACs, networks and device IDs
         for c in (2, 3, 4, 7):
@@ -339,6 +342,27 @@ class PacketsPane(QWidget):
             b.toggled.connect(self.mode_changed)
         esc_ = QShortcut(QKeySequence('Escape'), self.sq, activated=lambda: self.sq.clear())
         esc_.setContext(Qt.ShortcutContext.WidgetShortcut)
+
+    # -------------------------------------------------------------- columns --
+    COLW = [(.05, 48), (.07, 72), (.20, 150), (.17, 140), (.15, 110), (.08, 80), (.04, 40)]   # (share, minimum); Info gets the rest
+
+    def fit_columns(self):
+        if not self._auto_cols:
+            return
+        w = max(600, self.tv.viewport().width())
+        self._sizing = True
+        for i, (share, mn) in enumerate(self.COLW):
+            self.tv.setColumnWidth(i, max(mn, int(w * share)))
+        self._sizing = False
+
+    def _col_dragged(self, *_):
+        if not self._sizing:
+            self._auto_cols = False
+
+    def eventFilter(self, obj, ev):
+        if obj is self.tv and ev.type() == QEvent.Type.Resize:
+            self.fit_columns()
+        return False
 
     # ---------------------------------------------------------------- chips --
     def build_chips(self):
@@ -897,7 +921,7 @@ class MainWindow(QMainWindow):
         for b, colr in ((self.mode_c, '#0071e3'), (self.mode_d, '#0b8f83')):
             mg.addButton(b)
             b.setMinimumWidth(120)
-            b.setStyleSheet(f'QToolButton{{border:0;border-radius:6px;padding:4px 22px;font-weight:600}}'
+            b.setStyleSheet(f'QToolButton{{border:0;border-radius:6px;padding:4px 22px;font-weight:600;color:palette(window-text)}}'
                             f'QToolButton:checked{{background:{colr};color:white}}')
             sl.addWidget(b)
         seg.setStyleSheet('QFrame#seg{background:rgba(120,120,128,0.18);border-radius:8px}')
@@ -2044,6 +2068,8 @@ class MainWindow(QMainWindow):
     def set_theme(self, v):
         self.store.set('bi_theme', v)
         apply_theme(v)
+        app = QApplication.instance()
+        app.setStyle(app.style().name())          # re-create the style so checkboxes etc. repaint in the new colours
         self.pk.model.retheme()
         self.pk.model.layoutChanged.emit()
         for w in self.views.values():
@@ -2052,6 +2078,8 @@ class MainWindow(QMainWindow):
         self.toast('Theme: ' + (v or 'automatic'))
 
     def reset_panes(self):
+        self.pk._auto_cols = True
+        self.pk.fit_columns()
         self.pk.split.setSizes([600, 400])
         self.pk.bot.setSizes([600, 420])
         self.store.set('bi_split', None)
