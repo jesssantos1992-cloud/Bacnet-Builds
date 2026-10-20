@@ -962,6 +962,14 @@ class MainWindow(QMainWindow):
             b.setStyleSheet(f'QToolButton{{border:0;border-radius:6px;padding:4px 22px;font-weight:600;color:palette(window-text)}}'
                             f'QToolButton:checked{{background:{colr};color:white}}')
             sl.addWidget(b)
+        self.mode_putty = QToolButton(text='PuTTY ↗')   # opens PuTTY in its own window; not a mode
+        self.mode_putty.setMinimumWidth(110)
+        self.mode_putty.setStyleSheet('QToolButton{border:0;border-radius:6px;padding:4px 18px;font-weight:600;color:palette(window-text)}'
+                                      'QToolButton:hover{background:rgba(120,120,128,0.25)}'
+                                      'QToolButton:pressed{background:#6e56cf;color:white}')
+        self.mode_putty.setToolTip('Open PuTTY for SSH, Telnet or a serial console (opens in its own window)')
+        self.mode_putty.clicked.connect(self.open_putty)
+        sl.addWidget(self.mode_putty)
         seg.setStyleSheet('QFrame#seg{background:rgba(120,120,128,0.18);border-radius:8px}')
         self.mode_c.setToolTip('Captures and their analysis')
         self.mode_d.setToolTip('Find devices on the network and read their points (Ctrl+5)')

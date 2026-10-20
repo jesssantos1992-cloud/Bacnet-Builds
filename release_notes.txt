@@ -13,3 +13,4 @@
 - While Discover is joined to an MS/TP trunk, its frames show in the Live capture tab so you can see the traffic.
 - Sorting a very large capture no longer freezes the window, and re-sorting is much faster.
 - Smaller download: unused parts of Qt are no longer included.
+- PuTTY button next to Capture / Discover at the top opens PuTTY in its own window.
