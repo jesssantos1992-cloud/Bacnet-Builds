@@ -64,6 +64,7 @@ class DiscoverView(QWidget):
         for b in (self.b_new, self.b_scan, self.b_opts, self.b_arm):
             bl.addWidget(b)
         v.addWidget(bar)
+        v.addWidget(self._conn_bar())
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         v.addWidget(line)
@@ -133,6 +134,279 @@ class DiscoverView(QWidget):
         self.tree.customContextMenuRequested.connect(self._menu)
         self._building = False
 
+    # ---------------------------------------------------------- connection --
+    def _conn_bar(self):
+        """BACnet/IP or MS/TP (USB RS-485), and the MS/TP port, baud, MAC and Join controls."""
+        w = QFrame()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(18, 0, 18, 8)
+        v.setSpacing(6)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(label('Connection', bold=True, wrap=False))
+        seg = QFrame()
+        seg.setObjectName('cseg')
+        seg.setStyleSheet('QFrame#cseg{background:rgba(120,120,128,0.18);border-radius:8px}')
+        sl = QHBoxLayout(seg)
+        sl.setContentsMargins(2, 2, 2, 2)
+        sl.setSpacing(0)
+        from PySide6.QtWidgets import QButtonGroup
+        self.m_ip = QToolButton(text='BACnet/IP  (network port)', checkable=True)
+        self.m_ms = QToolButton(text='MS/TP  (USB RS-485 adapter)', checkable=True)
+        g = QButtonGroup(self)
+        g.setExclusive(True)
+        for b in (self.m_ip, self.m_ms):
+            g.addButton(b)
+            b.setStyleSheet('QToolButton{border:0;border-radius:6px;padding:4px 16px;font-weight:600}'
+                            'QToolButton:checked{background:#0b8f83;color:white}')
+            sl.addWidget(b)
+        (self.m_ms if self.ex.mode == 'mstp' else self.m_ip).setChecked(True)
+        row.addWidget(seg)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.ms = QWidget()
+        ml = QHBoxLayout(self.ms)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(8)
+        st = self.win.store.get('bi_mstp') or {}
+        ml.addWidget(QLabel('Port'))
+        self.ms_port = QComboBox()
+        self.ms_port.setMinimumWidth(260)
+        ml.addWidget(self.ms_port)
+        rf = QToolButton(text='↻')
+        rf.setToolTip('Look for serial adapters again')
+        ml.addWidget(rf)
+        ml.addWidget(QLabel('Baud'))
+        self.ms_baud = QComboBox()
+        self.ms_baud.addItems(['9600', '19200', '38400', '57600', '76800', '115200'])
+        self.ms_baud.setCurrentText(str(st.get('baud') or 38400))
+        ml.addWidget(self.ms_baud)
+        self.ms_detect = QPushButton('Detect')
+        self.ms_detect.setToolTip('Listen on the trunk and find the baud rate')
+        ml.addWidget(self.ms_detect)
+        ml.addWidget(QLabel('PC’s MAC'))
+        from PySide6.QtWidgets import QSpinBox
+        self.ms_mac = QSpinBox()
+        self.ms_mac.setRange(0, 127)
+        self.ms_mac.setValue(int(st.get('mac', 127)))
+        self.ms_mac.setToolTip('The MS/TP address the PC uses on the trunk. It must not be used by any other device.')
+        ml.addWidget(self.ms_mac)
+        self.ms_find = QPushButton('Find a free MAC')
+        self.ms_find.setToolTip('Listen to the trunk for a few seconds (without sending) and pick a free address')
+        ml.addWidget(self.ms_find)
+        self.ms_join = QPushButton('Join trunk')
+        self.ms_join.setDefault(True)
+        ml.addWidget(self.ms_join)
+        ml.addStretch(1)
+        v.addWidget(self.ms)
+        self.ms_status = label('', muted=True)
+        v.addWidget(self.ms_status)
+        self.m_ip.toggled.connect(lambda on: on and self.set_mode('ip'))
+        self.m_ms.toggled.connect(lambda on: on and self.set_mode('mstp'))
+        rf.clicked.connect(self.fill_ports)
+        self.ms_detect.clicked.connect(self.ms_detect_baud)
+        self.ms_find.clicked.connect(self.ms_find_mac)
+        self.ms_join.clicked.connect(self.ms_join_leave)
+        self.fill_ports()
+        self.ms.setVisible(self.ex.mode == 'mstp')
+        self.ms_status.setVisible(self.ex.mode == 'mstp')
+        return w
+
+    def fill_ports(self):
+        cur = self.ms_port.currentData() or (self.win.store.get('bi_mstp') or {}).get('port')
+        self.ms_port.clear()
+        try:
+            from serial.tools import list_ports
+            ports = list(list_ports.comports())
+        except ImportError:
+            ports = []
+        for p in ports:
+            self.ms_port.addItem(f'{p.device} – {p.description}', p.device)
+        if not ports:
+            self.ms_port.addItem('No serial / USB RS-485 adapter found – plug it in, then press ↻', '')
+        i = self.ms_port.findData(cur)
+        if i >= 0:
+            self.ms_port.setCurrentIndex(i)
+
+    def set_mode(self, m):
+        self.ex.mode = m
+        self.win.store.set('bi_dmode', m)
+        self.ms.setVisible(m == 'mstp')
+        self.ms_status.setVisible(m == 'mstp')
+        self.node = None
+        self.pk = None
+        self.refresh()
+
+    def _ms_settings(self):
+        port, baud, mac = self.ms_port.currentData(), int(self.ms_baud.currentText()), self.ms_mac.value()
+        self.win.store.set('bi_mstp', {'port': port, 'baud': baud, 'mac': mac})
+        return port, baud, mac
+
+    def _port_busy(self, port):
+        s = self.win.live.cur()
+        if self.win.run and s and s.get('backend') == 'serial' and s.get('id') == port:
+            return f'{port} is being used by the live capture. Stop the capture first (one program at a time can use a COM port).'
+        return ''
+
+    def _ms_msg(self, text, bad=False):
+        self.ms_status.setText(text)
+        self.ms_status.setStyleSheet(f"color:{colors()['se'] if bad else colors()['mu']}")
+
+    def ms_detect_baud(self):
+        port, _b, _m = self._ms_settings()
+        if not port:
+            return self._ms_msg('Choose the serial port of your USB RS-485 adapter first.', True)
+        if self.ex.link and self.ex.link.on:
+            return self._ms_msg('Leave the trunk first.', True)
+        busy = self._port_busy(port)
+        if busy:
+            return self._ms_msg(busy, True)
+        self.ms_detect.setEnabled(False)
+        self._ms_msg('Listening at each common baud rate…')
+        import bacnet_live as BL
+
+        def work():
+            d = BL.autobaud(port)
+
+            def done():
+                self.ms_detect.setEnabled(True)
+                if d.get('error'):
+                    self._ms_msg(d['error'], True)
+                elif d.get('baud'):
+                    self.ms_baud.setCurrentText(str(d['baud']))
+                    self._ms_settings()
+                    self._ms_msg(f"Detected {d['baud']} baud. Now press Find a free MAC.")
+                else:
+                    self._ms_msg('No MS/TP traffic was heard at any common baud rate. Check the wiring (try swapping A and B) '
+                                 'and that devices on the trunk are powered.', True)
+            self.win.on_ui(done)
+        self.ex.run(work)
+
+    def ms_find_mac(self, then_join=False):
+        port, baud, _m = self._ms_settings()
+        if not port:
+            return self._ms_msg('Choose the serial port of your USB RS-485 adapter first.', True)
+        if self.ex.link and self.ex.link.on:
+            return self._ms_msg('Leave the trunk first.', True)
+        busy = self._port_busy(port)
+        if busy:
+            return self._ms_msg(busy, True)
+        self.ms_find.setEnabled(False)
+        self.ms_join.setEnabled(False)
+        self._ms_msg(f'Listening to the trunk at {baud} baud for a few seconds (the PC does not send anything)…')
+        import bi_mstp as M
+
+        def work():
+            try:
+                info = M.listen(port, baud, 4.0)
+                err = ''
+            except Exception as e:
+                import bacnet_live as BL
+                info, err = None, BL.serial_error(e, port)
+
+            def done():
+                self.ms_find.setEnabled(True)
+                self.ms_join.setEnabled(True)
+                if err:
+                    return self._ms_msg(err, True)
+                info['_key'] = (port, baud)
+                self._listen = info
+                mac, why = M.suggest_mac(info)
+                used = ', '.join(map(str, info['srcs'][:30])) or 'none'
+                if mac is None:
+                    return self._ms_msg(f'{why[:1].upper()}{why[1:]}. Addresses in use: {used}.', True)
+                self.ms_mac.setValue(mac)
+                self._ms_settings()
+                self._ms_msg(f'MAC {mac} is free – {why}. Heard {info["frames"]} frames; addresses in use: {used}.'
+                             + ('' if then_join else ' Press Join trunk.'))
+                if then_join:
+                    self._join(info)
+            self.win.on_ui(done)
+        self.ex.run(work)
+
+    def ms_join_leave(self):
+        link = self.ex.link
+        if link and link.on:
+            link.stop()
+            self.ex.link = None
+            self._ms_msg('Left the trunk.')
+            self.ms_join.setText('Join trunk')
+            for w in (self.ms_port, self.ms_baud, self.ms_mac, self.ms_detect, self.ms_find):
+                w.setEnabled(True)
+            return self.refresh()
+        port, baud, mac = self._ms_settings()
+        info = getattr(self, '_listen', None)
+        if not info or info.get('_key') != (port, baud):
+            return self.ms_find_mac(then_join=True)          # always look at the trunk before joining
+        self._join(info)
+
+    def _join(self, info):
+        import bi_mstp as M
+        port, baud, mac = self._ms_settings()
+        info['_key'] = (port, baud)
+        if mac in info['srcs']:
+            return self._ms_msg(f'MAC {mac} is already used by a device on this trunk. Press Find a free MAC.', True)
+        if not info['frames'] and info.get('bytes'):
+            return self._ms_msg('Data is arriving but none of it is valid MS/TP – the baud rate is probably wrong '
+                                '(press Detect), or A and B are swapped. Not joining.', True)
+        busy = self._port_busy(port)
+        if busy:
+            return self._ms_msg(busy, True)
+        link = M.MstpLink(port, baud, mac, on_npdu=self.ex.rx_mstp, on_status=self.ex.notify,
+                          allow_create=not info['frames'])
+        try:
+            link.start()
+        except Exception as e:
+            import bacnet_live as BL
+            return self._ms_msg(BL.serial_error(e, port), True)
+        self.ex.link = link
+        self.ex.pump()
+        self.ms_join.setText('Leave trunk')
+        for w in (self.ms_port, self.ms_baud, self.ms_mac, self.ms_detect, self.ms_find):
+            w.setEnabled(False)
+        self.live = True
+        self.ex_changed()
+
+    def ms_update(self):
+        link = self.ex.link
+        if link is None:
+            return
+        if not link.on and link.error:
+            self._ms_msg(link.error, True)
+            self.ex.link = None
+            self.ms_join.setText('Join trunk')
+            for w in (self.ms_port, self.ms_baud, self.ms_mac, self.ms_detect, self.ms_find):
+                w.setEnabled(True)
+            return
+        self._ms_msg(link.status_text())
+
+    @staticmethod
+    def is_ms(d):
+        """Does this Discover entry belong to the MS/TP connection?"""
+        if d['ex'] and E.is_mstp(d['ex']):
+            return True
+        c = d['cap']
+        return bool(c) and (str(c['key']).startswith('MS/TP MAC') or str(c.get('gw') or '').startswith('MS/TP MAC'))
+
+    def all_devs(self):
+        """The devices for the chosen connection (BACnet/IP or MS/TP), sorted by network and ID."""
+        ms = self.ex.mode == 'mstp'
+        L = [d for d in self.sd_devs() if self.is_ms(d) == ms]
+        return sorted(L, key=lambda a: (-1 if a['net'] is None else a['net'], a['id']))
+
+    def grp(self, d):
+        if d['net'] is not None:
+            return d['net']
+        return 'mstp' if self.is_ms(d) else 'local'
+
+    def grp_name(self, k, short=False):
+        if k == 'mstp':
+            port = self.ex.link.port if self.ex.link else (self.win.store.get('bi_mstp') or {}).get('port') or ''
+            return 'MS/TP trunk' + (f' ({port})' if port else '')
+        if k == 'local':
+            return 'This network' if short else 'Local Network – BACnet/IP'
+        return f'Network {k}'
+
     # ----------------------------------------------------------------- data --
     def sd_devs(self):
         """Devices from the capture and from discovery, in one list (the original's sdDevs)."""
@@ -142,7 +416,7 @@ class DiscoverView(QWidget):
         nmv = F.nm or {}
         lab = self.win.labels
         for d in F.dv or []:
-            ip = E.ip_of(d['key'])
+            ip = E.ip_of(d['key']) or (d['key'] if str(d['key']).startswith('MS/TP MAC') else '')
             e = next((x for x in ex if x['id'] == d['id'] and (x['ip'] == ip or (x.get('sn') is not None and x.get('sn') == d['sn']))), None)
             if e:
                 used.add(e['key'])
@@ -196,10 +470,14 @@ class DiscoverView(QWidget):
         self.armpill.setVisible(armed)
         self.b_arm.setText('Write access ON – turn off' if armed else 'Enable write access…')
         self.b_arm.setStyleSheet('QPushButton{background:#c42b1c;color:white}' if armed else '')
-        AL = sorted(self.sd_devs(), key=lambda a: (-1 if a['net'] is None else a['net'], a['id']))
+        AL = self.all_devs()
         D = [d for d in AL if d['ex'] or d['key'] in self.vis]
         self.b_new.setVisible(bool(D))
-        self.b_scan.setText('Stop scan' if self.ex.busy == 'scan' else 'Scan network')
+        ms = self.ex.mode == 'mstp'
+        self.b_scan.setText('Stop scan' if self.ex.busy == 'scan' else 'Scan MS/TP trunk' if ms else 'Scan network')
+        self.b_opts.setVisible(not ms)                   # broadcast address / BBMD options are IP-only
+        if ms:
+            self.ms_update()
         show_left = bool(self.pk) or (self.live and bool(D))
         self.left.setVisible(show_left)
         if self.ex.busy == 'scan':
@@ -246,11 +524,11 @@ class DiscoverView(QWidget):
             L0 = [d for d in AL if d['cap'] and (not q or q in f"{d['id']} {d['name']} {d['vendor']} {d['ip']}".lower())]
             groups = {}
             for d in L0:
-                groups.setdefault('local' if d['net'] is None else d['net'], []).append(d)
+                groups.setdefault(self.grp(d), []).append(d)
             for k, L in groups.items():
                 gk = 'n' + str(k)
-                lab = self.win.labels.n(k) if k != 'local' else ''
-                g = QTreeWidgetItem(tr, [('This network' if k == 'local' else f'Network {k}') + (f' “{lab}”' if lab else '')
+                lab = self.win.labels.n(k) if isinstance(k, int) else ''
+                g = QTreeWidgetItem(tr, [self.grp_name(k, True) + (f' “{lab}”' if lab else '')
                                          + f"  · {len(L)} device{'' if len(L) == 1 else 's'}"])
                 g.setData(0, K_ROLE, ('g', gk))
                 g.setFlags(g.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
@@ -267,7 +545,7 @@ class DiscoverView(QWidget):
         else:
             groups = {}
             for d in D:
-                groups.setdefault('local' if d['net'] is None else d['net'], []).append(d)
+                groups.setdefault(self.grp(d), []).append(d)
 
             def pm(o):
                 return q in f"{o['name']} {E.sd_ty(o['ty'])} {o['inst']}".lower()
@@ -278,8 +556,8 @@ class DiscoverView(QWidget):
                 if not L:
                     continue
                 gk = 'n' + str(k)
-                lab = self.win.labels.n(k) if k != 'local' else ''
-                g = QTreeWidgetItem(tr, [('Local Network – BACnet/IP' if k == 'local' else f'Network {k}') + (f' “{lab}”' if lab else '')
+                lab = self.win.labels.n(k) if isinstance(k, int) else ''
+                g = QTreeWidgetItem(tr, [self.grp_name(k) + (f' “{lab}”' if lab else '')
                                          + f"  · {len(L)} device{'' if len(L) == 1 else 's'}"])
                 g.setData(0, K_ROLE, ('g', gk))
                 g.setFont(0, bold)
@@ -368,7 +646,7 @@ class DiscoverView(QWidget):
     # ----------------------------------------------------------- right side --
     def build_right(self, D, AL):
         if AL is None:
-            AL = sorted(self.sd_devs(), key=lambda a: (-1 if a['net'] is None else a['net'], a['id']))
+            AL = self.all_devs()
             D = [d for d in AL if d['ex'] or d['key'] in self.vis]
         p = self.right
         y = p.scroll.verticalScrollBar().value()
@@ -446,7 +724,7 @@ class DiscoverView(QWidget):
         if self.pk:
             parts.append(('Choose devices', None))
         elif n and en:
-            parts.append(('This network' if en['net'] is None else f"Network {en['net']}", None))
+            parts.append((self.grp_name(self.grp(en), True), None))
             dev = f"Device {en['id']}" + (f" “{en['name']}”" if en['name'] else '')
             deeper = n.get('t') is not None or n.get('o') is not None
             parts.append((dev, (lambda k=n['k']: self.go_node({'k': k})) if deeper else None))
@@ -490,7 +768,10 @@ class DiscoverView(QWidget):
              f"{len(cap)} device{'' if len(cap) == 1 else 's'} seen in the capture you have open" if cap else
              'No devices in the open capture yet – start or open a capture first',
              self.pick_capture, bool(pk and pk['src'] == 'cap'), not run)
-        card('Stop scan' if self.ex.busy == 'scan' else 'Scan the network', 'Send a Who-Is and list who answers', lambda: self.scan(), False, not run)
+        ms = self.ex.mode == 'mstp'
+        card('Stop scan' if self.ex.busy == 'scan' else 'Scan the MS/TP trunk' if ms else 'Scan the network',
+             'Send a Who-Is on the RS-485 trunk (join the trunk first)' if ms else 'Send a Who-Is and list who answers',
+             lambda: self.scan(), False, not run)
         w = QWidget()
         w.setLayout(cards)
         p.add(w)
@@ -823,6 +1104,13 @@ class DiscoverView(QWidget):
             return
         if ex.busy:
             return
+        if ex.mode == 'mstp' and not (ex.link and ex.link.on and ex.link.joined):
+            if quiet:
+                return
+            self._ms_msg('Join the MS/TP trunk first (choose the port, press Find a free MAC, then Join trunk).'
+                         if not (ex.link and ex.link.on) else
+                         'Still waiting to be invited into the token ring – the scan can start once the PC has the token.', True)
+            return
         self.live = True
         self.pk = None
         ex.run(ex.scan, lambda n: self.win.on_ui(lambda: n and self.win.labels_changed()))
@@ -878,6 +1166,8 @@ class DiscoverView(QWidget):
     def read_points(self, en):
         e = en['ex'] or (en['cap'] and self.ex.ensure(en['cap']))
         if not e:
+            if self.is_ms(en):
+                return self._ms_msg('This device is on an MS/TP trunk: join the trunk first (Connection: MS/TP, then Join trunk).', True)
             return self.win.toast('This device is not reachable by IP')
         e['stale'] = 1
         self.open.add(e['key'])

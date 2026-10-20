@@ -3,3 +3,4 @@
 - IP addresses, MS/TP MACs, network numbers and device IDs are highlighted again in the packet list, packet details, tables and the Devices tree.
 - Fixed: text could briefly draw on top of itself when a page updated.
 - PuTTY is now included: Tools > PuTTY opens it for SSH, Telnet or a serial console.
+- Discover over MS/TP: choose Connection: MS/TP, pick your USB RS-485 adapter, press Join trunk. The PC listens first, picks a free MAC address, joins the token ring and can scan and read points directly on the trunk (no router needed).

@@ -1543,6 +1543,10 @@ class MainWindow(QMainWindow):
             return
         if not s or s.get('backend') == 'none':
             return self.live.show_err((s or {}).get('hint') or 'No adapter selected.')
+        link = self.explorer.link
+        if s.get('backend') == 'serial' and link and link.on and link.port == s.get('id'):
+            return self.live.show_err(f"{s['id']} is in use by Discover (joined to the MS/TP trunk). Leave the trunk in "
+                                      'Discover first – one program at a time can use a COM port.')
         self.LT.ts = time.time()
         self.live.show_err('')
         self.switch_tab(self.LT)
@@ -1552,7 +1556,7 @@ class MainWindow(QMainWindow):
         self.poll_timer.start()
         self.poll()
         ex = self.explorer
-        if ex.opt.get('auto') and s.get('backend') != 'serial':
+        if ex.opt.get('auto') and s.get('backend') != 'serial' and ex.mode != 'mstp':
             QTimer.singleShot(1500, lambda: self.run and not ex.busy and self.view('x').scan(quiet=True))
 
     def clear_live(self, local_only=False):
@@ -1990,6 +1994,8 @@ class MainWindow(QMainWindow):
             pass
         self.explorer.stop = True
         self.explorer.on = False
+        if self.explorer.link:
+            self.explorer.link.stop()          # leave the MS/TP trunk and free the COM port
         self.store.flush()
         e.accept()
 

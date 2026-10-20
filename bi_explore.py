@@ -81,7 +81,8 @@ def unq(s):
     return s
 
 
-def ex_wrap(route, apdu, exp, bc=False, fn=None):
+def ex_npdu(route, apdu, exp, bc=False):
+    """NPDU (network layer) + APDU: what goes inside a BACnet/IP packet or an MS/TP data frame."""
     n = [1, 0]
     if bc:
         n[1] = 0x20
@@ -91,9 +92,18 @@ def ex_wrap(route, apdu, exp, bc=False, fn=None):
         n += [route['dnet'] >> 8, route['dnet'] & 255, len(route['dadr']), *route['dadr'], 255]
     else:
         n[1] = 4 if exp else 0
-    d = n + list(apdu)
+    return bytes(n + list(apdu))
+
+
+def ex_wrap(route, apdu, exp, bc=False, fn=None):
+    d = ex_npdu(route, apdu, exp, bc)
     L = len(d) + 4
-    return bytes([0x81, fn or (0x0B if bc else 0x0A), L >> 8, L & 255, *d])
+    return bytes([0x81, fn or (0x0B if bc else 0x0A), L >> 8, L & 255]) + d
+
+
+def is_mstp(d):
+    """Is this discovery entry reached directly on the MS/TP trunk (not over IP)?"""
+    return bool(d) and d.get('via') == 'mstp'
 
 
 def ex_rp(o, p, idx=None):
@@ -289,6 +299,8 @@ class Explorer:
                 d.update(st='last scan', old=1, objs=None)
                 self.devs[d['key']] = d
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix='bacnet-discover')
+        self.link = None                                   # bi_mstp.MstpLink while joined to an MS/TP trunk
+        self.mode = store.get('bi_dmode') or 'ip'          # 'ip' or 'mstp': how Discover reaches devices
 
     # -------------------------------------------------------------- plumbing --
     def armed(self):
@@ -304,13 +316,36 @@ class Explorer:
 
     def cache(self):
         keep = ('key', 'id', 'ip', 'port', 'route', 'sn', 'sa', 'mx', 'sg', 'vn', 'name', 'vendor', 'model', 'fw', 'sw',
-                'desc', 'loc')
+                'desc', 'loc', 'via', 'mac')
         self.store.set('bi_disc', {'at': self.scan_at, 'd': [{k: d.get(k) for k in keep} for d in list(self.devs.values())]})
 
     def send(self, dest, b):
         err = self.relay.send(dest, bytes(b))
         if err:
             raise RuntimeError(err)
+
+    def send_mstp(self, dst, npdu, expecting_reply):
+        """Queue an NPDU on the MS/TP trunk. The same read-only rules as BACnet/IP apply."""
+        import bacnet_live as BL
+        link = self.link
+        if not link or not link.on:
+            raise RuntimeError('Not connected to the MS/TP trunk – press Join trunk first')
+        if not link.joined:
+            raise RuntimeError('Still waiting to be invited into the MS/TP token ring – try again in a moment')
+        fake = bytes([0x81, 0x0B if dst == 255 else 0x0A, (len(npdu) + 4) >> 8, (len(npdu) + 4) & 255]) + bytes(npdu)
+        why = BL._read_only_ok(fake, self.relay.armed_left() > 0)
+        if why:
+            raise RuntimeError('Blocked: ' + why)
+        if BL._is_write(fake):
+            try:
+                import json
+                import os
+                with open(os.path.join(BL.state_dir(), 'writes.log'), 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({'time': time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        'to': f'{link.port} MS/TP MAC {dst}', 'hex': bytes(npdu).hex()}) + '\n')
+            except OSError:
+                pass
+        link.send(dst, npdu, expecting_reply)
 
     def pump(self):
         """Start the receive loop (once)."""
@@ -352,6 +387,16 @@ class Explorer:
             ip = '.'.join(str(x) for x in d[4:8])
             port = d[8] << 8 | d[9]
             i = 10
+        self._rx_npdu(d, i, L, ip, port)
+
+    def rx_mstp(self, src, npdu, bc):
+        """Called by the MS/TP link for every data frame addressed to us (or broadcast)."""
+        try:
+            self._rx_npdu(bytes(npdu) + C._PAD, 0, len(npdu), f'MS/TP MAC {src}', 0, src)
+        except (IndexError, ValueError, KeyError):
+            pass
+
+    def _rx_npdu(self, d, i, L, ip, port, mac=None):
         if d[i] != 1:
             return
         c = d[i + 1]
@@ -395,6 +440,8 @@ class Explorer:
                        'MAC ' + str(sa[0]) if len(sa) == 1 else hex2(sa))
             nd = {'key': key, 'id': did, 'ip': ip, 'port': port, 'route': {'dnet': sn, 'dadr': sa} if sn is not None else None,
                   'sn': sn, 'sa': sas, 'mx': mx, 'sg': sg, 'vn': vn, 'st': 'found', 'objs': None}
+            if mac is not None:
+                nd.update(via='mstp', mac=mac)
             old = self.devs.get(key)
             if old:
                 keep = {k: old.get(k) for k in ('name', 'vendor', 'model', 'fw', 'sw', 'desc', 'loc', 'objs')}
@@ -441,9 +488,14 @@ class Explorer:
             apdu[2] = inv
             p = _Pending(dev)
             self.pend[inv] = p
+        if is_mstp(dev):
+            tmo = max(tmo, 5.0)          # the answer may wait until the device next holds the token
         for _ in range(tries):
             try:
-                self.send(f"{dev['ip']}:{dev['port']}", ex_wrap(dev.get('route'), apdu, 1))
+                if is_mstp(dev):
+                    self.send_mstp(dev['mac'], ex_npdu(dev.get('route'), apdu, 1), True)
+                else:
+                    self.send(f"{dev['ip']}:{dev['port']}", ex_wrap(dev.get('route'), apdu, 1))
             except RuntimeError as e:
                 with self.lock:
                     self.pend.pop(inv, None)
@@ -536,30 +588,47 @@ class Explorer:
         ap = [0x10, 8, 0x08 | len(un(lo)), *un(lo), 0x18 | len(un(hi)), *un(hi)] if ok else [0x10, 8]
         dest = o.get('to') or 'broadcast'
         bbmd = (o.get('bbmd') or '').strip()
+        mstp = self.mode == 'mstp'
         for d in list(self.devs.values()):
-            d['old'] = 1
+            if is_mstp(d) == mstp:
+                d['old'] = 1
         try:
-            if bbmd:
-                self.bbmd_rc = None
-                self.send(bbmd + ':47808', bytes([0x81, 0x05, 0, 6, 1, 0x2C]))
-                time.sleep(0.7)
-                if self.bbmd_rc:
-                    self.msg = f'The BBMD at {bbmd} refused the registration (code 0x{self.bbmd_rc:x}). Scanning this subnet only.'
-            for _ in range(2):
-                if self.stop:
-                    break
-                if dest == 'broadcast':
-                    self.send('broadcast', ex_wrap(None, ap, 0, True))
-                else:
-                    self.send(dest + ':47808', ex_wrap(None, ap, 0, False, 0x0B))
-                if bbmd and not self.bbmd_rc:
-                    self.send(bbmd + ':47808', ex_wrap(None, ap, 0, False, 0x09))
-                time.sleep(2.2)
+            if mstp:                                        # Who-Is on the RS-485 trunk
+                for _ in range(2):
+                    if self.stop:
+                        break
+                    self.send_mstp(255, ex_npdu(None, ap, 0, True), False)
+                    time.sleep(3.0)                         # I-Am answers arrive as each device gets the token
+            else:
+                self._scan_ip(ap, dest, bbmd)
         except RuntimeError as e:
             self.busy = ''
-            self.msg = 'Could not send: ' + str(e)
+            self.msg = ('' if mstp else 'Could not send: ') + str(e)
             self.notify()
             return
+        self._scan_finish(on_done)
+
+    def _scan_ip(self, ap, dest, bbmd):
+        """Who-Is over BACnet/IP: broadcast (or to one address), optionally through a BBMD."""
+        if bbmd:
+            self.bbmd_rc = None
+            self.send(bbmd + ':47808', bytes([0x81, 0x05, 0, 6, 1, 0x2C]))
+            time.sleep(0.7)
+            if self.bbmd_rc:
+                self.msg = f'The BBMD at {bbmd} refused the registration (code 0x{self.bbmd_rc:x}). Scanning this subnet only.'
+        for _ in range(2):
+            if self.stop:
+                break
+            if dest == 'broadcast':
+                self.send('broadcast', ex_wrap(None, ap, 0, True))
+            else:
+                self.send(dest + ':47808', ex_wrap(None, ap, 0, False, 0x0B))
+            if bbmd and not self.bbmd_rc:
+                self.send(bbmd + ':47808', ex_wrap(None, ap, 0, False, 0x09))
+            time.sleep(2.2)
+
+    def _scan_finish(self, on_done):
+        """After the Who-Is: read the names of the devices that answered."""
         found = [d for d in list(self.devs.values()) if not d.get('old')]
         todo = [d for d in found if not d.get('name') or d.get('st') == 'found']
         self.msg = f'Found {len(found)} – reading names…'
@@ -750,7 +819,25 @@ class Explorer:
         self.notify()
 
     def ensure(self, d):
-        """A discovery entry for a device seen in a capture, so it can be read over IP."""
+        """A discovery entry for a device seen in a capture, so it can be read over IP (or over MS/TP
+        when the PC is joined to the trunk)."""
+        import re
+        m = re.match(r'^MS/TP MAC (\d+)$', str(d['key']))
+        g = re.match(r'^MS/TP MAC (\d+)$', str(d.get('gw') or ''))
+        if m or (d['sn'] is not None and g):
+            if not self.link:
+                return None
+            mac = int((m or g).group(1))
+            route = {'dnet': d['sn'], 'dadr': sa_bytes(d['sa'])} if not m else None
+            ipn = f'MS/TP MAC {mac}'
+            key = f"{d['id']}@{ipn}" + (f"/{d['sn']}:{hex2(route['dadr'])}" if route else '')
+            e = self.devs.get(key)
+            if not e:
+                e = {'key': key, 'id': d['id'], 'ip': ipn, 'port': 0, 'route': route, 'sn': d['sn'] if route else None,
+                     'sa': d['sa'] if route else '', 'mx': 480, 'sg': 3, 'vn': d['v'], 'st': 'from capture',
+                     'objs': None, 'via': 'mstp', 'mac': mac}
+                self.devs[key] = e
+            return e
         ip = ip_of(d['key'])
         if not ip:
             return None
