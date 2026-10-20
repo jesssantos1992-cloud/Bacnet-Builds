@@ -4,6 +4,7 @@ network, with the guarded write dialog. The network work itself is in bi_explore
 """
 from __future__ import annotations
 
+import re
 import time
 
 from PySide6.QtCore import Qt, QTimer
@@ -513,6 +514,13 @@ class DiscoverView(QWidget):
             return f"{n} device{'' if n == 1 else 's'} · {on} answered the scan {ago(self.ex.scan_at)}"
         return f"{n} device{'' if n == 1 else 's'} from your capture. Press Scan network to see which are online."
 
+    @staticmethod
+    def dev_label(d):
+        """Device ID · vendor · model, plus the device's name when it is a real one (not the default "device<ID>")."""
+        vn = re.sub(r',?\s+(Corporation|Corp\.?|Inc\.?|Incorporated|LLC|Ltd\.?|Limited|GmbH|AG|Co\.?)$', '', d.get('vendor') or '', flags=re.I)
+        nm = dev_name(d.get('name'), d.get('id'))
+        return ' · '.join(str(x) for x in (d['id'], vn, d.get('model')) if x) + (f'  “{nm}”' if nm else '')
+
     def _dot(self, d):
         e = d['ex']
         c = colors()
@@ -547,7 +555,7 @@ class DiscoverView(QWidget):
                 g.setData(0, K_ROLE, ('g', gk))
                 g.setFlags(g.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
                 for d in L:
-                    it = QTreeWidgetItem(g, [f"{d['id']}   {d['name']}" + (f"   — {d['vendor']}" if d['vendor'] else '')])
+                    it = QTreeWidgetItem(g, [self.dev_label(d)])
                     it.setData(0, K_ROLE, ('pk', d['key']))
                     it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                     it.setCheckState(0, Qt.CheckState.Checked if d['key'] in self.pk['sel'] else Qt.CheckState.Unchecked)
@@ -578,9 +586,8 @@ class DiscoverView(QWidget):
                 for d in L:
                     e = d['ex']
                     dot, col, tip = self._dot(d)
-                    it = QTreeWidgetItem(g, [f"{dot}  " + (f"{d['name']} {d['id']}" if d['name'] else f"Device {d['id']}")
-                                             + (f"  – {d['ip']}" if d['ip'] else '')])
-                    it.setToolTip(0, f"{tip}\n{d['vendor']}" if d['vendor'] else tip)
+                    it = QTreeWidgetItem(g, [f"{dot}  {self.dev_label(d)}" + (f"  – {d['ip']}" if d['ip'] else '')])
+                    it.setToolTip(0, '\n'.join(str(x) for x in (tip, d['name'], d['vendor'], d['ip']) if x))
                     it.setForeground(0, QColor(colors()['fg']))
                     it.setData(0, K_ROLE, ('d', d['key']))
                     if sel and sel['k'] == d['key'] and sel.get('t') is None and sel.get('o') is None:
