@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 
 import bi_core as C
 import bi_explore as E
-from bi_common import Page, Pill, Table, colors, csv_text, doc, esc, heading, html_table, label, stamp
+from bi_common import Page, Pill, Table, colors, csv_text, dev_name, doc, esc, heading, html_table, label, stamp
 
 K_ROLE = Qt.ItemDataRole.UserRole
 
@@ -739,7 +739,8 @@ class DiscoverView(QWidget):
             parts.append(('Choose devices', None))
         elif n and en:
             parts.append((self.grp_name(self.grp(en), True), None))
-            dev = f"Device {en['id']}" + (f" “{en['name']}”" if en['name'] else '')
+            nm_ = dev_name(en['name'], en['id'])
+            dev = f"Device {en['id']}" + (f" “{nm_}”" if nm_ else '')
             deeper = n.get('t') is not None or n.get('o') is not None
             parts.append((dev, (lambda k=n['k']: self.go_node({'k': k})) if deeper else None))
             t = n['t'] if n.get('t') is not None else E.o_t(n['o']) if n.get('o') is not None else None
@@ -1420,7 +1421,7 @@ def all_props_dialog(view, dev, o):
     name = o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"
     d.setWindowTitle(f"All properties – {name}")
     v = QVBoxLayout(d)
-    v.addWidget(label(f"Device {dev['id']}" + (f" “{dev['name']}”" if dev.get('name') else '') +
+    v.addWidget(label(f"Device {dev['id']}" + (f" “{dev_name(dev.get('name'), dev['id'])}”" if dev_name(dev.get('name'), dev['id']) else '') +
                       f" · {E.sd_ty(o['ty'])} {o['inst']} · read just now from the device (read-only)", muted=True))
     msg = label('⏳ Reading every property…', muted=True)
     v.addWidget(msg)
@@ -1521,7 +1522,7 @@ def write_dialog(win, dev, row):
     d = QDialog(win)
     d.setWindowTitle(f'Write to {nm}')
     v = QVBoxLayout(d)
-    v.addWidget(label(f"Device {dev['id']}" + (f" “{dev['name']}”" if dev.get('name') else '') + f' · {tn} · present-value', muted=True))
+    v.addWidget(label(f"Device {dev['id']}" + (f" “{dev_name(dev.get('name'), dev['id'])}”" if dev_name(dev.get('name'), dev['id']) else '') + f' · {tn} · present-value', muted=True))
     v.addWidget(label(f"Current value: {(str(row.get('val') or '').strip() or 'unknown')} {row.get('u') or ''}", bold=True))
     f = QFormLayout()
     if binary:

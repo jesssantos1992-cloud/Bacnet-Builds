@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
-from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, flow_row, colors_light, csv_text, doc, esc, heading, html_table, is_dark,
+from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
 
 VN = C.VN
@@ -761,14 +761,14 @@ def map_svg(win, dark=None):
         for e in list(win.explorer.devs.values()):
             if hip(e.get('ip')) == hip(g) and e.get('id') is not None and e['id'] not in m:
                 m[e['id']] = e.get('name') or ''
-        a = [f'Device {i}' + (f' · {n}' if n else '') for i, n in m.items()]
+        a = [f'Device {i}' + (f' · {dev_name(n, i)}' if dev_name(n, i) else '') for i, n in m.items()]
         return a[:3] + [f'+ {len(a) - 3} more'] if len(a) > 3 else a
 
     def dl(d):
         m = nmv.get(d['id']) or {}
         vn = m.get('vendor') or VN.get(d['v']) or ''
         addr = hip(d['key']) if d['sn'] is None else re.sub(r'^(\d)', r'MAC \1', str(d['sa'] if d['sa'] is not None else 'network ' + str(d['sn'])))
-        return [f"Device {d['id']} · {addr}", ' · '.join(x for x in [m.get('name'), vn] if x)]
+        return [f"Device {d['id']} · {addr}", ' · '.join(x for x in [dev_name(m.get('name'), d['id']), vn] if x)]
     dmax = gmax = 0
     for g in gs:
         for n in T[g]:

@@ -54,6 +54,13 @@ def esc(s):
     return html.escape(str(s), quote=False)
 
 
+def dev_name(name, dev_id):
+    """A device's name, or '' when it is only the factory default (e.g. "device240011" for device 240011)."""
+    if not name or dev_id is None:
+        return name or ''
+    return '' if re.sub(r'[\s_\-.]', '', str(name)).lower() == f'device{dev_id}' else name
+
+
 def qa(s):
     return html.escape(str(s), quote=True)
 
