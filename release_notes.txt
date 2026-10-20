@@ -1,3 +1,5 @@
+- New here? A short guided tour shows you around the first time you open the app (Help > Take the tour to see it again).
+- Tips pop up once as you work, pointing out shortcuts and quicker ways (Help > Show tips to turn them on or off).
 - A new, cleaner look: a calmer sidebar with line icons, a sliding Capture / Discover switch, one accent colour, softer cards, roomier rows and the title bar now blends into the window.
 - Search everything with Ctrl+K (or the Search box at the top): jump to any view, device, point, capture tab or command by typing.
 - Discover: clicking a point opens its details in a panel that slides in on the right, so the list of points stays in view.

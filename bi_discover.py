@@ -750,6 +750,7 @@ class DiscoverView(QWidget):
             self.insp.setStyleSheet(f"QFrame#insp{{background:{colors()['card']};border-left:1px solid {colors()['hair']}}}")
             self.insp.show()
             self._slide(self.INSP_W)
+            self.win.tip('insp', self.insp_x, 700)
 
     def _slide(self, to):
         from PySide6.QtCore import QParallelAnimationGroup, QPropertyAnimation, QEasingCurve

@@ -1,7 +1,7 @@
 """
 bi_ui.py - the app's look and feel: fonts, one accent colour, line icons, the sliding segmented
 control, toasts, the thin progress bar, spinners, skeleton rows, empty states, view fades, the
-Ctrl+K command palette and the About / What's new windows.
+Ctrl+K command palette, tips, the first-run tour and the About / What's new windows.
 """
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ import os
 import sys
 import time
 
-from PySide6.QtCore import (QByteArray, QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSize, Qt, QTimer,
-                            QVariantAnimation)
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtCore import (QByteArray, QEasingCurve, QEvent, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt,
+                            QTimer, QVariantAnimation)
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen,
+                           QPixmap, QPolygonF)
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QDialog, QFrame, QGraphicsOpacityEffect,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QDialog, QFrame, QGraphicsDropShadowEffect,
+                               QGraphicsOpacityEffect,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy,
                                QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
@@ -792,7 +794,7 @@ def _bullets(text):
     return out
 
 
-def whats_new_dialog(parent, version, notes):
+def whats_new_dialog(parent, version, notes, on_tour=None):
     d = QDialog(parent)
     d.setWindowTitle('What’s new')
     v = QVBoxLayout(d)
@@ -831,6 +833,10 @@ def whats_new_dialog(parent, version, notes):
     sa.setWidget(inner)
     v.addWidget(sa, 1)
     br = QHBoxLayout()
+    if on_tour:
+        tb = QPushButton('Take the tour')
+        tb.clicked.connect(lambda: (d.accept(), QTimer.singleShot(150, on_tour)))
+        br.addWidget(tb)
     br.addStretch(1)
     ok = primary(QPushButton('Continue'))
     ok.clicked.connect(d.accept)
@@ -881,3 +887,338 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
     v.addWidget(cr)
     d.setFixedWidth(520)
     d.exec()
+
+
+# ------------------------------------------------------------- keyboard keys --
+def keycaps(keys):
+    """'Ctrl+K' or 'Ctrl+1 … Ctrl+9' drawn as little keyboard keys."""
+    w = QWidget()
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(3)
+    c = colors()
+    dark = is_dark()
+    css = (f"QLabel{{background:{'#3a3a3c' if dark else '#ffffff'};color:{c['fg']};border:1px solid "
+           f"{'rgba(255,255,255,0.16)' if dark else 'rgba(0,0,0,0.16)'};border-bottom-width:2px;border-radius:5px;"
+           "padding:1px 6px;font-weight:600}")
+    for tok in (keys or '').split():
+        if tok in ('…', 'or', '/', 'then'):
+            h.addWidget(label(tok, muted=True, wrap=False))
+            continue
+        for i, k in enumerate(tok.split('+')):
+            if i:
+                h.addWidget(label('+', muted=True, wrap=False))
+            cap = QLabel(k.replace('Left', '←').replace('Right', '→'))
+            cap.setStyleSheet(css)
+            cap.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            h.addWidget(cap)
+        h.addSpacing(4)
+    h.addStretch(1)
+    w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    return w
+
+
+# ------------------------------------------------------------------ tips --
+class TipBubble(QWidget):
+    """A small speech bubble that points at a control and suggests a shortcut or a quicker way."""
+    A = 9                                      # arrow size
+
+    def __init__(self, host, on_off):
+        super().__init__(host)
+        self.host = host
+        self.down = False                      # False: bubble below the control, arrow on top
+        self.ax = 30
+        self.setFixedWidth(340)
+        v = QVBoxLayout(self)
+        v.setSpacing(8)
+        top = QHBoxLayout()
+        top.setSpacing(6)
+        self.ic = QLabel()
+        top.addWidget(self.ic)
+        self.title = label('Tip', bold=True, wrap=False)
+        top.addWidget(self.title, 1)
+        self.xb = QPushButton()
+        self.xb.setFlat(True)
+        self.xb.setFixedSize(22, 22)
+        self.xb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.xb.setToolTip('Close')
+        self.xb.clicked.connect(self.close_tip)
+        top.addWidget(self.xb)
+        v.addLayout(top)
+        self.text = label('', wrap=True)
+        v.addWidget(self.text)
+        self.kw = QWidget()
+        self.kl = QVBoxLayout(self.kw)
+        self.kl.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(self.kw)
+        bot = QHBoxLayout()
+        self.off = QPushButton('Turn off tips')
+        self.off.setFlat(True)
+        self.off.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.off.clicked.connect(lambda: (self.close_tip(), on_off()))
+        bot.addWidget(self.off)
+        bot.addStretch(1)
+        self.ok = QPushButton('Got it')
+        self.ok.clicked.connect(self.close_tip)
+        bot.addWidget(self.ok)
+        v.addLayout(bot)
+        sh = QGraphicsDropShadowEffect(self)
+        sh.setBlurRadius(28)
+        sh.setOffset(0, 4)
+        sh.setColor(QColor(0, 0, 0, 70))
+        self.setGraphicsEffect(sh)
+        self.timer = QTimer(self, singleShot=True, timeout=self.close_tip)
+        self.anchor = None
+        self.hide()
+        host.installEventFilter(self)
+
+    def retheme(self):
+        c = colors()
+        self.ic.setPixmap(pixmap('f', c['wa'], 18, 1.9))
+        self.title.setStyleSheet(f"color:{c['fg']}")
+        self.xb.setIcon(icon('close', c['mu'], 12, 2))
+        self.off.setStyleSheet(f"QPushButton{{color:{c['mu']};border:0;padding:2px 0}}QPushButton:hover{{color:{c['ac']}}}")
+        primary(self.ok)
+
+    def show_tip(self, anchor, title, text, keys=''):
+        self.retheme()
+        self.title.setText(title)
+        self.text.setText(text)
+        while self.kl.count():
+            w = self.kl.takeAt(0).widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        if keys:
+            self.kl.addWidget(keycaps(keys))
+        self.kw.setVisible(bool(keys))
+        self.anchor = anchor
+        self._place()
+        self.raise_()
+        self.show()
+        self.timer.start(12000)
+
+    def _place(self):
+        h = self.host
+        a = self.anchor
+        if a is not None and a.isVisible():
+            r = QRect(a.mapTo(h, a.rect().topLeft()), a.size())
+        else:
+            r = QRect(h.width() // 2 - 1, 60, 2, 2)
+        m = self.layout()
+        m.setContentsMargins(16, 12 + self.A, 14, 12)
+        self.adjustSize()
+        hh = self.height()
+        self.down = r.bottom() + hh + 8 > h.height() and r.top() - hh > 8
+        m.setContentsMargins(16, 12 + (0 if self.down else self.A), 14, 12 + (self.A if self.down else 0))
+        self.adjustSize()
+        hh = self.height()
+        cx = min(r.center().x(), r.left() + 60)
+        x = max(8, min(h.width() - self.width() - 8, cx - 40))
+        y = r.top() - hh - 2 if self.down else r.bottom() + 2
+        self.ax = max(20, min(self.width() - 20, cx - x))
+        self.move(int(x), int(max(4, min(h.height() - hh - 4, y))))
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        A = self.A
+        body = QRectF(self.rect()).adjusted(.5, .5 + (0 if self.down else A), -.5, -.5 - (A if self.down else 0))
+        path = QPainterPath()
+        path.addRoundedRect(body, 12, 12)
+        if self.down:
+            tri = QPolygonF([QPointF(self.ax - A, body.bottom() - 1), QPointF(self.ax, body.bottom() + A),
+                             QPointF(self.ax + A, body.bottom() - 1)])
+        else:
+            tri = QPolygonF([QPointF(self.ax - A, body.top() + 1), QPointF(self.ax, body.top() - A),
+                             QPointF(self.ax + A, body.top() + 1)])
+        t = QPainterPath()
+        t.addPolygon(tri)
+        path = path.united(t)
+        p.setPen(QPen(QColor(255, 255, 255, 30) if is_dark() else QColor(0, 0, 0, 30), 1))
+        p.setBrush(QColor('#2c2c2e' if is_dark() else '#ffffff'))
+        p.drawPath(path)
+        p.end()
+
+    def close_tip(self):
+        self.timer.stop()
+        self.hide()
+
+    def eventFilter(self, o, e):
+        if e.type() == QEvent.Type.Resize and self.isVisible():
+            self._place()
+        return False
+
+    def enterEvent(self, e):
+        self.timer.stop()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self.timer.start(6000)
+        super().leaveEvent(e)
+
+
+# ------------------------------------------------------------------ tour --
+class Tour(QWidget):
+    """A guided tour: dims the window, lights up one area at a time and explains it in a card.
+    steps: [(target, title, text, keys)] where target is a widget, a callable returning a QRect in window
+    coordinates, or None for a centred card."""
+
+    def __init__(self, win, steps, on_done):
+        super().__init__(win)
+        self.win, self.steps, self.on_done = win, steps, on_done
+        self.i = 0
+        self.hole = None
+        self.setGeometry(win.rect())
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.card = QFrame(self)
+        self.card.setObjectName('tourcard')
+        self.card.setFixedWidth(400)
+        cv = QVBoxLayout(self.card)
+        cv.setContentsMargins(22, 18, 22, 16)
+        cv.setSpacing(8)
+        self.step_l = label('', muted=True, wrap=False)
+        cv.addWidget(self.step_l)
+        self.t = label('', bold=True, size=17, wrap=False)
+        cv.addWidget(self.t)
+        self.x = label('')
+        cv.addWidget(self.x)
+        self.kw = QWidget()
+        self.kl = QVBoxLayout(self.kw)
+        self.kl.setContentsMargins(0, 2, 0, 2)
+        cv.addWidget(self.kw)
+        cv.addSpacing(4)
+        row = QHBoxLayout()
+        self.skip = QPushButton('Skip tour')
+        self.skip.setFlat(True)
+        self.skip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.skip.clicked.connect(self.finish)
+        row.addWidget(self.skip)
+        row.addStretch(1)
+        self.dots = QLabel()
+        row.addWidget(self.dots)
+        row.addStretch(1)
+        self.prev = QPushButton('Back')
+        self.prev.clicked.connect(lambda: self.go(self.i - 1))
+        row.addWidget(self.prev)
+        self.nxt = QPushButton('Next')
+        self.nxt.clicked.connect(lambda: self.go(self.i + 1))
+        row.addWidget(self.nxt)
+        cv.addLayout(row)
+        sh = QGraphicsDropShadowEffect(self.card)
+        sh.setBlurRadius(40)
+        sh.setOffset(0, 8)
+        sh.setColor(QColor(0, 0, 0, 90))
+        self.card.setGraphicsEffect(sh)
+        win.installEventFilter(self)
+        self.show()
+        self.raise_()
+        self.setFocus()
+        self.go(0)
+
+    def _rect(self, target):
+        if target is None:
+            return None
+        if callable(target) and not isinstance(target, QWidget):
+            r = target()
+            return QRect(r) if r is not None else None
+        if not target.isVisible():
+            return None
+        return QRect(target.mapTo(self.win, target.rect().topLeft()), target.size())
+
+    def go(self, i):
+        if i < 0:
+            return
+        if i >= len(self.steps):
+            return self.finish()
+        self.i = i
+        target, title, text, keys = self.steps[i]
+        r = self._rect(target)
+        self.hole = r.adjusted(-6, -6, 6, 6) if r is not None else None
+        c = colors()
+        dark = is_dark()
+        self.card.setStyleSheet(f"QFrame#tourcard{{background:{'#2c2c2e' if dark else '#ffffff'};border-radius:14px;"
+                                f"border:1px solid {'rgba(255,255,255,0.12)' if dark else 'rgba(0,0,0,0.10)'}}}")
+        self.skip.setStyleSheet(f"QPushButton{{color:{c['mu']};border:0;padding:2px 0}}QPushButton:hover{{color:{c['ac']}}}")
+        primary(self.nxt)
+        last = i == len(self.steps) - 1
+        inner = not (i == 0 or last)
+        self.step_l.setText(f'{i} of {len(self.steps) - 2}' if inner else '')
+        self.step_l.setVisible(inner)
+        self.t.setText(title)
+        self.x.setText(text)
+        while self.kl.count():
+            w = self.kl.takeAt(0).widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        if keys:
+            self.kl.addWidget(keycaps(keys))
+        self.kw.setVisible(bool(keys))
+        self.prev.setVisible(inner)
+        self.skip.setVisible(not last)
+        self.nxt.setText('Start the tour' if i == 0 else 'Done' if last else 'Next')
+        self.dots.setText(' '.join(f"<span style='color:{c['ac'] if k == i else c['bd']}'>●</span>"
+                                   for k in range(len(self.steps))))
+        self.card.adjustSize()
+        self._place_card()
+        fade_in(self.card, 200)
+        self.update()
+        self.nxt.setFocus()
+
+    def _place_card(self):
+        W, H = self.width(), self.height()
+        cw, ch = self.card.width(), self.card.height()
+        h = self.hole
+        if h is None:
+            x, y = (W - cw) // 2, (H - ch) // 2
+        else:
+            gap = 16
+            spots = [(h.left(), h.bottom() + gap), (h.right() + gap, h.top()), (h.left(), h.top() - ch - gap),
+                     (h.left() - cw - gap, h.top())]
+            x, y = next(((x, y) for x, y in spots if y >= 8 and y + ch <= H - 8 and x <= W - 60 and x + cw >= 60),
+                        ((W - cw) // 2, H - ch - 24))
+            x = max(8, min(W - cw - 8, x))
+            y = max(8, min(H - ch - 8, y))
+        self.card.move(int(x), int(y))
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.setFillRule(Qt.FillRule.OddEvenFill)
+        path.addRect(QRectF(self.rect()))
+        if self.hole is not None:
+            path.addRoundedRect(QRectF(self.hole), 10, 10)
+        p.fillPath(path, QColor(0, 0, 0, 125 if is_dark() else 100))
+        if self.hole is not None:
+            p.setPen(QPen(QColor(colors()['ac']), 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(self.hole), 10, 10)
+        p.end()
+
+    def mousePressEvent(self, e):
+        e.accept()                               # the window underneath waits until the tour is over
+
+    def keyPressEvent(self, e):
+        k = e.key()
+        if k == Qt.Key.Key_Escape:
+            self.finish()
+        elif k in (Qt.Key.Key_Right, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.go(self.i + 1)
+        elif k == Qt.Key.Key_Left:
+            self.go(self.i - 1)
+
+    def eventFilter(self, o, e):
+        if o is self.win and e.type() == QEvent.Type.Resize:
+            self.setGeometry(self.win.rect())
+            QTimer.singleShot(0, lambda: self.go(self.i))
+        return False
+
+    def finish(self):
+        self.win.removeEventFilter(self)
+        self.hide()
+        self.deleteLater()
+        if self.on_done:
+            self.on_done()

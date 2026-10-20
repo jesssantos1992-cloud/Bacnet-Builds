@@ -11,8 +11,8 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import (QAbstractTableModel, QByteArray, QEvent, QModelIndex, QObject, QSize, Qt, QThread, QTimer,
-                            Signal)
+from PySide6.QtCore import (QAbstractTableModel, QByteArray, QEvent, QModelIndex, QObject, QRect, QSize, Qt, QThread,
+                            QTimer, Signal)
 from PySide6.QtGui import (QAction, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap,
                            QShortcut)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -523,6 +523,8 @@ class PacketsPane(QWidget):
         else:
             n = len(self.HI)
             self.sqn.setText(f"{C.locale_int(n)} match{'' if n == 1 else 'es'}" + (f' · {self.HK + 1} of {n}' if self.HK >= 0 and n else ''))
+            if n > 1:
+                self.win.tip('find', self.sq)
 
     def sq_go(self, d):
         if not self.HI:
@@ -548,6 +550,7 @@ class PacketsPane(QWidget):
         if self.win.ac:
             self.win.ac.sel_no = self.sel.no
         self.show_packet(self.sel)
+        self.win.tip('packet', self.tv)
 
     def clear_details(self):
         self.sel = None
@@ -627,7 +630,7 @@ class PacketsPane(QWidget):
         add(m, 'Open this device in Discover', lambda: win.open_device_from_packet(dv), dv)
         add(m, 'Read this point now (live, read-only)', lambda: win.read_now(dv, ob), dv and ob)
         m.addSeparator()
-        add(m, 'Remove bookmark' if r.bm else 'Bookmark this packet', lambda: win.toggle_bm(r))
+        add(m, 'Remove bookmark' if r.bm else 'Bookmark this packet', lambda: (win.toggle_bm(r), win.tip('bookmark', self.tv)))
         add(m, 'Edit note…' if r.note else 'Add note…', lambda: win.note_dlg(r))
         m.exec(self.tv.viewport().mapToGlobal(pos))
 
@@ -902,6 +905,7 @@ class MainWindow(QMainWindow):
                 self.side_items[k] = it
             self.side.addItem(it)
         self.side.currentItemChanged.connect(self._side_changed)
+        self.side.itemClicked.connect(lambda _it: self.tip('views', self.side))
         sv.addWidget(self.side, 1)
         h.addWidget(self.sidew)
         col = QWidget()
@@ -917,6 +921,7 @@ class MainWindow(QMainWindow):
         self.back = U.tool(QToolButton(), 'back', tip='Back to where you were (Alt+←)', px=18)
         self.back.setEnabled(False)
         self.back.clicked.connect(self.nav_back)
+        self.back.clicked.connect(lambda: self.tip('back', self.back))
         tg.addWidget(self.back, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.mode_c = QToolButton(text='Capture')
         self.mode_d = QToolButton(text='Discover')
@@ -925,7 +930,7 @@ class MainWindow(QMainWindow):
         self.mode_c.setToolTip('Captures and their analysis')
         self.mode_d.setToolTip('Find devices on the network and read their points (Ctrl+5)')
         self.mode_c.clicked.connect(lambda: self.goto(self.last_capture_view))
-        self.mode_d.clicked.connect(lambda: self.goto('x'))
+        self.mode_d.clicked.connect(lambda: (self.goto('x'), self.tip('discover', self.seg)))
         tg.addWidget(self.seg, 0, 1, Qt.AlignmentFlag.AlignCenter)
         rw = QWidget()
         rl = QHBoxLayout(rw)
@@ -935,7 +940,7 @@ class MainWindow(QMainWindow):
         self.find_b.setToolTip('Jump to any view, device, point, capture tab or command (Ctrl+K)')
         self.find_b.setCursor(Qt.CursorShape.PointingHandCursor)
         self.find_b.setMinimumWidth(170)
-        self.find_b.clicked.connect(self.command_palette)
+        self.find_b.clicked.connect(lambda: self.command_palette(True))
         rl.addWidget(self.find_b)
         self.mode_putty = U.tool(QToolButton(), 'terminal', 'PuTTY',
                                  'Open PuTTY for SSH, Telnet or a serial console (opens in its own window)', 18)
@@ -1026,6 +1031,7 @@ class MainWindow(QMainWindow):
         self.empty_view = U.EmptyState()       # analysis views before a capture is open
         self.stack.addWidget(self.empty_view)
         self.toaster = U.Toast(root)
+        self.tipper = U.TipBubble(self, self.tips_off)
         self.write_timer = QTimer(self, interval=1000, timeout=self.wb_draw)
         self.write_timer.start()
         self.poll_timer = QTimer(self, interval=700, timeout=self.poll)
@@ -1165,12 +1171,22 @@ class MainWindow(QMainWindow):
         act(m, 'PuTTY help', lambda: self.open_putty_file('putty.chm'))
         act(m, 'PuTTY licence', lambda: self.open_putty_file('LICENCE'))
         m = mb.addMenu('&Help')
+        self.help_menu = m
+        act(m, 'Take the tour', self.tour)
         act(m, 'Getting started', lambda: self.help('start'), 'F1')
         act(m, 'Display filter reference', lambda: self.help('filter'))
         act(m, 'Everyday BMS tools', lambda: self.help('bms'))
         act(m, 'Keyboard shortcuts', lambda: self.help('keys'))
         m.addSeparator()
         act(m, 'Search everything…', self.command_palette)
+        m.addSeparator()
+        self.m_tips = QAction('Show tips', self, checkable=True)
+        self.m_tips.toggled.connect(self.set_tips)
+        m.addAction(self.m_tips)
+        act(m, 'Show all tips again', self.reset_tips)
+        m.aboutToShow.connect(lambda: (self.m_tips.blockSignals(True),
+                                       self.m_tips.setChecked(not (self.store.get('bi_tips') or {}).get('off')),
+                                       self.m_tips.blockSignals(False)))
         m.addSeparator()
         act(m, 'What’s new', self.whats_new)
         act(m, 'Check for updates…', lambda: self.upd_check(True))
@@ -1403,6 +1419,8 @@ class MainWindow(QMainWindow):
         for p in paths:
             self.store.set('bi_dir', os.path.dirname(p))
             self.open_path(p)
+        if paths:
+            self.tip('open', self.tabrow, 900)
 
     def open_path(self, path, q='', activate=True):
         path = os.path.abspath(path)
@@ -1553,6 +1571,8 @@ class MainWindow(QMainWindow):
     def _q_apply(self):
         self.pk.relist()
         self.save_session()
+        if self.qbox.text().strip():
+            self.tip('filter', self.qbox, 1200)
 
     def filter_state(self, q, ok):
         self.q_ok.setVisible(bool(q))
@@ -1616,10 +1636,13 @@ class MainWindow(QMainWindow):
             self.update_back()
         U.style_titlebar(self)
         seen = self.store.get('bi_seen_ver')
-        if seen != BL.APP_VERSION:
+        if self.first_run_ui and seen != BL.APP_VERSION:
             self.store.set('bi_seen_ver', BL.APP_VERSION)
             if seen or self.store.get('bi_geom'):          # an existing user who has just updated
+                self.store.set('bi_toured', self.store.get('bi_toured') or 'offered')
                 QTimer.singleShot(700, self.whats_new)
+            elif not self.store.get('bi_toured'):         # brand new: show them around
+                QTimer.singleShot(900, self.tour)
         if self.store.get('bi_updauto', '1') != '0' and time.time() - float(self.store.get('bi_updlast') or 0) > 86400:
             QTimer.singleShot(4000, lambda: self.upd_check(False))
 
@@ -1674,6 +1697,7 @@ class MainWindow(QMainWindow):
         self.run = True
         self.poll_timer.start()
         self.poll()
+        self.tip('live', self.live.follow, 3000)
         ex = self.explorer
         if ex.opt.get('auto') and s.get('backend') != 'serial' and ex.mode != 'mstp':
             QTimer.singleShot(1500, lambda: self.run and not ex.busy and self.view('x').scan(quiet=True))
@@ -2203,6 +2227,7 @@ class MainWindow(QMainWindow):
         U.apply_palette(app)
         self.style_chrome()
         U.style_titlebar(self)
+        self.tipper.update()
         self.pk.model.retheme()
         self.pk.model.layoutChanged.emit()
         for w in self.views.values():
@@ -2226,7 +2251,7 @@ class MainWindow(QMainWindow):
         self.prog.set_state(on, pct)
 
     # -------------------------------------------------------- command palette --
-    def command_palette(self):
+    def command_palette(self, from_button=False):
         """Ctrl+K: jump to anything by typing."""
         import bi_explore as E
         items = []
@@ -2262,6 +2287,8 @@ class MainWindow(QMainWindow):
         for f in self.FD:
             items.append(('f', f['t'], f['s'].lower(), lambda: self.goto('f'), 'Finding'))
         U.CommandPalette(self, items).exec()
+        if from_button:
+            self.tip('search', self.find_b)
 
     def open_point(self, k, o):
         dv = self.view('x')
@@ -2276,7 +2303,110 @@ class MainWindow(QMainWindow):
         if os.path.isfile(p):
             with open(p, encoding='utf-8', errors='replace') as f:
                 notes = f.read()
-        U.whats_new_dialog(self, BL.APP_VERSION, notes)
+        U.whats_new_dialog(self, BL.APP_VERSION, notes, self.tour)
+
+    # ---------------------------------------------------------- tips & tour --
+    first_run_ui = False                   # set by main(): the tour and What's new only open in the real app
+
+    TIPS = {
+        'views': ('Jump between views', 'Every view in the sidebar has a keyboard shortcut.', 'Ctrl+1 … Ctrl+9'),
+        'discover': ('Switch from the keyboard', 'Ctrl+5 opens Discover, and Ctrl+1 takes you back to the packets.',
+                     'Ctrl+5 or Ctrl+1'),
+        'search': ('Search from anywhere', 'Press Ctrl+K in any view to jump straight to a device, a point, a view or a '
+                   'menu command.', 'Ctrl+K'),
+        'back': ('Going back', 'Alt+Left, or the Back button on your mouse, does the same.', 'Alt+Left'),
+        'open': ('Drag and drop works too', 'Drag .pcap or .pcapng files onto the window to open them. Each capture '
+                 'gets its own tab.', 'Ctrl+O'),
+        'filter': ('Filters without typing', 'Right-click any packet and choose Apply as Filter. Press F1 to see every '
+                   'filter you can type.', 'F1'),
+        'packet': ('Filter by any cell', 'Double-click a cell in the packet list to show only the packets with that '
+                   'value. Right-click a packet for more.', ''),
+        'find': ('Step through the matches', 'Enter jumps to the next match and Shift+Enter to the previous one. Esc '
+                 'clears the search.', 'Enter or Shift+Enter'),
+        'bookmark': ('Bookmark faster', 'Ctrl+B bookmarks the selected packet. Edit > Show bookmarked packets lists '
+                     'them all.', 'Ctrl+B'),
+        'live': ('Reading while it captures?', 'Untick Follow newest so the list stops scrolling while you read.', ''),
+        'insp': ('Point details', 'Click another point in the list to see its details here. Esc closes this panel.', 'Esc'),
+    }
+
+    def tip(self, key, anchor=None, delay=400):
+        """Show a one-time tip next to what the user just used (at most one every 30 seconds)."""
+        cfg = self.store.get('bi_tips') or {}
+        if cfg.get('off') or key in (cfg.get('seen') or []) or getattr(self, '_touring', False) or key not in self.TIPS:
+            return
+        if time.time() - getattr(self, '_tip_t', 0) < 30 or self.tipper.isVisible():
+            return
+        self._tip_t = time.time()
+        self.store.set('bi_tips', {**cfg, 'seen': (cfg.get('seen') or []) + [key]})
+        t, x, k = self.TIPS[key]
+        QTimer.singleShot(delay, lambda: self.isVisible() and not getattr(self, '_touring', False)
+                          and self.tipper.show_tip(anchor, t, x, k))
+
+    def tips_off(self):
+        self.set_tips(False)
+        self.toast('Tips are off. You can turn them back on in Help > Show tips.')
+
+    def set_tips(self, on):
+        cfg = self.store.get('bi_tips') or {}
+        self.store.set('bi_tips', {**cfg, 'off': not on})
+        if not on:
+            self.tipper.close_tip()
+
+    def reset_tips(self):
+        self.store.set('bi_tips', {'off': False, 'seen': []})
+        self._tip_t = 0
+        self.toast('Tips will show again as you use the app')
+
+    def tour(self):
+        """A guided tour of the main parts of the window."""
+        if getattr(self, '_touring', False):
+            return
+        self._touring = True
+        self.tipper.close_tip()
+        if self.cur_view == 'x':
+            self.goto(self.last_capture_view)
+        if self.cur_view != 'p':
+            self.goto('p')
+        hm = self.help_menu.menuAction()
+
+        def help_rect():
+            g = self.menuBar().actionGeometry(hm)
+            return QRect(self.menuBar().mapTo(self, g.topLeft()), g.size())
+        steps = [
+            (None, 'Welcome to BACnet Inspector',
+             'See what is happening on a BACnet network: open a capture to find problems, or use Discover to find '
+             'devices and read their points live. This quick tour shows you around – it takes about a minute.', ''),
+            (self.seg, 'Two ways to work',
+             'Capture is for looking at recorded or live traffic. Discover finds the devices on the network, or on an '
+             'MS/TP trunk through a USB RS-485 adapter, and reads their points.', 'Ctrl+5'),
+            (self.tabrow, 'Captures open in tabs',
+             'Open a .pcap or .pcapng with Open capture or the + button, or drag files onto the window. The Live '
+             'capture tab records traffic from a network adapter or an RS-485 adapter.', 'Ctrl+O'),
+            (self.sidew, 'Look at a capture different ways',
+             'Findings explains problems in plain English. Devices, Network map, Traffic and the rest each answer one '
+             'question about the capture.', 'Ctrl+1 … Ctrl+9'),
+            (self.qbox, 'Filter the packets',
+             'Type a Wireshark-style filter such as device == 1001, or right-click any packet and choose Apply as '
+             'Filter. F1 lists every filter.', 'F1'),
+            (self.pk.top, 'Packets and their details',
+             'Click a packet to decode it underneath. Double-click a cell to filter by it. IP addresses, networks and '
+             'device IDs are highlighted so they are easy to spot.', 'Ctrl+F'),
+            (self.find_b, 'Find anything',
+             'Search jumps to any view, device, point, capture tab or menu command – just start typing.', 'Ctrl+K'),
+            (self.mode_putty, 'PuTTY is built in',
+             'Open an SSH, Telnet or serial console session without leaving the app.', ''),
+            (help_rect, 'Help is always here',
+             'Getting started, the filter reference, keyboard shortcuts and this tour are in the Help menu. Small tips '
+             'also pop up as you work – you can turn them off there.', 'F1'),
+            (None, 'You’re all set',
+             'Open a capture or start the live capture to begin. You can take this tour again any time from Help.', ''),
+        ]
+        U.Tour(self, steps, self._tour_done)
+
+    def _tour_done(self):
+        self._touring = False
+        self.store.set('bi_toured', BL.APP_VERSION)
+        self._tip_t = time.time()             # give it a moment before the first tip
 
     def about(self):
         page = None
@@ -2449,6 +2579,7 @@ def main():
     apply_theme(store.get('bi_theme') or '')
     U.apply_fonts(app)
     U.apply_palette(app)
+    MainWindow.first_run_ui = True
     w = MainWindow(store)
     try:
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: w.theme_soon())
