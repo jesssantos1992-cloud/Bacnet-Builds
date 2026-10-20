@@ -7,15 +7,17 @@ from __future__ import annotations
 import re
 import time
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSplitter,
                                QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
 import bi_explore as E
-from bi_common import Page, Pill, Table, colors, csv_text, dev_name, doc, esc, heading, html_table, label, stamp
+import bi_ui as U
+from bi_common import (Page, Pill, RowDelegate, Table, colors, csv_text, dev_name, doc, esc, heading, html_table, label,
+                       semibold, stamp)
 
 K_ROLE = Qt.ItemDataRole.UserRole
 
@@ -48,10 +50,11 @@ class DiscoverView(QWidget):
         bar = QFrame()
         bar.setObjectName('dxbar')
         bl = QHBoxLayout(bar)
-        bl.setContentsMargins(18, 10, 18, 10)
+        bl.setContentsMargins(24, 14, 24, 10)
+        bl.setSpacing(8)
         t = QVBoxLayout()
         t.setSpacing(0)
-        t.addWidget(label('Discover', bold=True, size=14, wrap=False))
+        t.addWidget(label('Discover', bold=True, size=17, wrap=False))
         t.addWidget(label('Find devices and read their points', muted=True, wrap=False))
         bl.addLayout(t)
         self.armpill = Pill('WRITE ACCESS ON', 'SERIOUS')
@@ -72,7 +75,8 @@ class DiscoverView(QWidget):
         self.split = QSplitter(Qt.Orientation.Horizontal)
         left = QWidget()
         ll = QVBoxLayout(left)
-        ll.setContentsMargins(10, 8, 6, 6)
+        ll.setContentsMargins(12, 10, 6, 8)
+        ll.setSpacing(8)
         self.status = label('', muted=True)
         ll.addWidget(self.status)
         self.q = QLineEdit()
@@ -82,9 +86,23 @@ class DiscoverView(QWidget):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
+        self.tree.setAnimated(True)
+        self.tree.setItemDelegate(RowDelegate(self.tree))
+        self.tree.setIconSize(QSize(12, 12))
+        self.tree.setFrameShape(QFrame.Shape.NoFrame)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         ll.addWidget(self.tree, 1)
-        self.leg = label('● answered scan    ● in capture    ○ not seen now', muted=True)
+        self.leg = QWidget()
+        lg = QHBoxLayout(self.leg)
+        lg.setContentsMargins(4, 0, 0, 0)
+        lg.setSpacing(4)
+        for ic, t_ in ((U.dot(colors()['no']), 'answered scan'), (U.dot('#0a84ff'), 'in capture'), (U.ring(colors()['mu']), 'not seen now')):
+            il = QLabel()
+            il.setPixmap(ic.pixmap(QSize(12, 12)))
+            lg.addWidget(il)
+            lg.addWidget(label(t_, muted=True, wrap=False))
+            lg.addSpacing(10)
+        lg.addStretch(1)
         ll.addWidget(self.leg)
         self.left = left
         self.split.addWidget(left)
@@ -94,12 +112,10 @@ class DiscoverView(QWidget):
         rv.setSpacing(0)
         nav = QWidget()                          # Back / Discover home / where you are
         nl = QHBoxLayout(nav)
-        nl.setContentsMargins(14, 8, 14, 6)
+        nl.setContentsMargins(16, 6, 16, 6)
         nl.setSpacing(6)
-        self.b_back = QToolButton(text='‹  Back')
-        self.b_back.setToolTip('Back to what you were looking at before (Alt+←, or the mouse Back button)')
-        self.b_home = QToolButton(text='⌂  Discover home')
-        self.b_home.setToolTip('Back to the Discover start page')
+        self.b_back = U.tool(QToolButton(), 'back', 'Back', 'Back to what you were looking at before (Alt+←, or the mouse Back button)')
+        self.b_home = U.tool(QToolButton(), 'home', 'Home', 'Back to the Discover start page')
         nl.addWidget(self.b_back)
         nl.addWidget(self.b_home)
         sep = QFrame()
@@ -114,8 +130,38 @@ class DiscoverView(QWidget):
         ln = QFrame()
         ln.setFrameShape(QFrame.Shape.HLine)
         rv.addWidget(ln)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
         self.right = Page(1100)
-        rv.addWidget(self.right, 1)
+        body.addWidget(self.right, 1)
+        # inspector: a point's details slide in on the right, so the list of points stays in view
+        self.insp = QFrame()
+        self.insp.setObjectName('insp')
+        iv = QVBoxLayout(self.insp)
+        iv.setContentsMargins(0, 0, 0, 0)
+        iv.setSpacing(0)
+        ih = QHBoxLayout()
+        ih.setContentsMargins(20, 12, 10, 4)
+        self.insp_t = label('', bold=True, size=13, wrap=True)
+        ih.addWidget(self.insp_t, 1)
+        self.insp_x = U.tool(QToolButton(), 'close', tip='Close (Esc)')
+        self.insp_x.clicked.connect(self.close_inspector)
+        ih.addWidget(self.insp_x, 0, Qt.AlignmentFlag.AlignTop)
+        iv.addLayout(ih)
+        self.insp_page = Page(10000)
+        self.insp_page.inner.layout().setContentsMargins(20, 4, 20, 20)
+        self.insp_page.scroll.viewport().setAutoFillBackground(False)
+        self.insp_page.inner.setAutoFillBackground(False)
+        iv.addWidget(self.insp_page, 1)
+        self.insp.setMinimumWidth(0)
+        self.insp.setMaximumWidth(0)
+        self.insp.hide()
+        body.addWidget(self.insp)
+        self._insp_anim = None
+        esc_ = QShortcut(QKeySequence('Escape'), self.insp, activated=self.close_inspector)
+        esc_.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        rv.addLayout(body, 1)
         self.split.addWidget(rightw)
         self.hist = []                           # earlier places in Discover, for Back
         self.b_back.clicked.connect(self.back)
@@ -140,27 +186,14 @@ class DiscoverView(QWidget):
         """BACnet/IP or MS/TP (USB RS-485), and the MS/TP port, baud, MAC and Join controls."""
         w = QFrame()
         v = QVBoxLayout(w)
-        v.setContentsMargins(18, 0, 18, 8)
-        v.setSpacing(6)
+        v.setContentsMargins(24, 0, 24, 12)
+        v.setSpacing(8)
         row = QHBoxLayout()
         row.setSpacing(8)
         row.addWidget(label('Connection', bold=True, wrap=False))
-        seg = QFrame()
-        seg.setObjectName('cseg')
-        seg.setStyleSheet('QFrame#cseg{background:rgba(120,120,128,0.18);border-radius:8px}')
-        sl = QHBoxLayout(seg)
-        sl.setContentsMargins(2, 2, 2, 2)
-        sl.setSpacing(0)
-        from PySide6.QtWidgets import QButtonGroup
-        self.m_ip = QToolButton(text='BACnet/IP  (network port)', checkable=True)
-        self.m_ms = QToolButton(text='MS/TP  (USB RS-485 adapter)', checkable=True)
-        g = QButtonGroup(self)
-        g.setExclusive(True)
-        for b in (self.m_ip, self.m_ms):
-            g.addButton(b)
-            b.setStyleSheet('QToolButton{border:0;border-radius:6px;padding:4px 16px;font-weight:600;color:palette(window-text)}'
-                            'QToolButton:checked{background:#0b8f83;color:white}')
-            sl.addWidget(b)
+        self.m_ip = QToolButton(text='BACnet/IP  (network port)')
+        self.m_ms = QToolButton(text='MS/TP  (USB RS-485 adapter)')
+        seg = U.Segmented([self.m_ip, self.m_ms])
         (self.m_ms if self.ex.mode == 'mstp' else self.m_ip).setChecked(True)
         row.addWidget(seg)
         row.addStretch(1)
@@ -174,8 +207,8 @@ class DiscoverView(QWidget):
         self.ms_port = QComboBox()
         self.ms_port.setMinimumWidth(260)
         ml.addWidget(self.ms_port)
-        rf = QToolButton(text='↻')
-        rf.setToolTip('Look for serial adapters again')
+        rf = U.tool(QToolButton(), 'refresh', tip='Look for serial adapters again')
+        self.ms_rf = rf
         ml.addWidget(rf)
         ml.addWidget(QLabel('Baud'))
         self.ms_baud = QComboBox()
@@ -224,7 +257,7 @@ class DiscoverView(QWidget):
         for p in ports:
             self.ms_port.addItem(f'{p.device} – {p.description}', p.device)
         if not ports:
-            self.ms_port.addItem('No serial / USB RS-485 adapter found – plug it in, then press ↻', '')
+            self.ms_port.addItem('No serial / USB RS-485 adapter found – plug it in, then press Refresh', '')
         i = self.ms_port.findData(cur)
         if i >= 0:
             self.ms_port.setCurrentIndex(i)
@@ -496,7 +529,7 @@ class DiscoverView(QWidget):
         show_left = bool(self.pk) or (self.live and bool(D))
         self.left.setVisible(show_left)
         if self.ex.busy == 'scan':
-            self.status.setText('⏳ ' + self.ex.msg)
+            self.status.setText(self.ex.msg)
         else:
             self.status.setText(self.status_text(D))
         if show_left:
@@ -537,8 +570,7 @@ class DiscoverView(QWidget):
         tr.setUpdatesEnabled(False)
         tr.clear()
         q = self.tq.lower()
-        bold = QFont(tr.font())
-        bold.setBold(True)
+        bold = semibold(QFont(tr.font()))
         mu = QColor(colors()['mu'])
         cur = None
         if self.pk:
@@ -586,7 +618,8 @@ class DiscoverView(QWidget):
                 for d in L:
                     e = d['ex']
                     dot, col, tip = self._dot(d)
-                    it = QTreeWidgetItem(g, [f"{dot}  {self.dev_label(d)}" + (f"  – {d['ip']}" if d['ip'] else '')])
+                    it = QTreeWidgetItem(g, [self.dev_label(d) + (f"  – {d['ip']}" if d['ip'] else '')])
+                    it.setIcon(0, U.ring(col) if dot == '○' else U.dot(col))
                     it.setToolTip(0, '\n'.join(str(x) for x in (tip, d['name'], d['vendor'], d['ip']) if x))
                     it.setForeground(0, QColor(colors()['fg']))
                     it.setData(0, K_ROLE, ('d', d['key']))
@@ -678,11 +711,14 @@ class DiscoverView(QWidget):
         e = en['ex'] if en else None
         row = next((o for o in (e or {}).get('objs') or [] if o['o'] == n.get('o')), None) if en and n.get('o') is not None else None
         self.nav_bar(n, en, row)
+        if not (row and e):
+            self.hide_inspector()
         if not n or not en:
             self.start_page(p, D, AL)
         else:
             if row and e:
-                self.point_page(p, en, e, row)
+                self.cat_page(p, en, e, row['ty'], sel=row['o'])
+                self.show_inspector(en, e, row)
             elif n.get('t') is not None and e:
                 self.cat_page(p, en, e, n['t'])
             else:
@@ -696,6 +732,60 @@ class DiscoverView(QWidget):
         self.node = n
         self._push(prev)
         self.refresh()
+
+    # ------------------------------------------------------------ inspector --
+    INSP_W = 470
+
+    def show_inspector(self, en, e, row):
+        self.insp_t.setText(row['name'] or f"{E.sd_ty(row['ty'])} {row['inst']}")
+        ip = self.insp_page
+        y = ip.scroll.verticalScrollBar().value()
+        ip.setUpdatesEnabled(False)
+        ip.clear()
+        self.point_page(ip, en, e, row)
+        ip.end()
+        ip.setUpdatesEnabled(True)
+        QTimer.singleShot(0, lambda: ip.scroll.verticalScrollBar().setValue(y))
+        if not self.insp.isVisible() or self._insp_anim == 'closing':
+            self.insp.setStyleSheet(f"QFrame#insp{{background:{colors()['card']};border-left:1px solid {colors()['hair']}}}")
+            self.insp.show()
+            self._slide(self.INSP_W)
+
+    def _slide(self, to):
+        from PySide6.QtCore import QParallelAnimationGroup, QPropertyAnimation, QEasingCurve
+        g = QParallelAnimationGroup(self)
+        for prop in (b'minimumWidth', b'maximumWidth'):
+            a = QPropertyAnimation(self.insp, prop, g)
+            a.setDuration(200)
+            a.setStartValue(self.insp.width() if self.insp.isVisible() else 0)
+            a.setEndValue(to)
+            a.setEasingCurve(QEasingCurve.Type.OutCubic)
+            g.addAnimation(a)
+        self._insp_anim = 'closing' if to == 0 else 'opening'
+
+        def done():
+            if self._insp_anim == 'closing' and to == 0:
+                self.insp.hide()
+            self._insp_anim = None
+        g.finished.connect(done)
+        g.start(QParallelAnimationGroup.DeletionPolicy.DeleteWhenStopped)
+
+    def hide_inspector(self):
+        if self.insp.isVisible() and self._insp_anim != 'closing':
+            self._slide(0)
+
+    def close_inspector(self):
+        n = self.node
+        if n and n.get('o') is not None:
+            self.go_node({'k': n['k'], 't': E.o_t(n['o'])})
+
+    def retheme(self):
+        for b, n in ((self.b_back, 'back'), (self.b_home, 'home')):
+            b.setIcon(U.icon(n, colors()['ac'], 16))
+        for b, n in ((self.insp_x, 'close'), (self.ms_rf, 'refresh')):
+            b.setIcon(U.icon(n, colors()['fg'], 16))
+        if self.insp.isVisible():
+            self.insp.setStyleSheet(f"QFrame#insp{{background:{colors()['card']};border-left:1px solid {colors()['hair']}}}")
 
     # ----------------------------------------------------------- navigation --
     def _push(self, prev):
@@ -776,14 +866,21 @@ class DiscoverView(QWidget):
         p.add(label('New discover', bold=True, size=17))
         p.add(label('Choose where the devices come from, pick the ones you want, then press Discover to read their points into a tree.', muted=True))
         cards = QHBoxLayout()
+        cards.setSpacing(12)
+        c_ = colors()
 
         def card(title, sub, fn, on=False, enabled=True):
             b = QPushButton(f'{title}\n{sub}')
-            b.setMinimumHeight(64)
+            b.setMinimumHeight(72)
             b.setCheckable(True)
             b.setChecked(on)
             b.setEnabled(bool(enabled))
-            b.setStyleSheet('QPushButton{text-align:left;padding:10px 14px}')
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(f"QPushButton{{text-align:left;padding:14px 18px;border-radius:12px;background:{c_['card']};"
+                            f"border:1px solid {c_['hair']};color:{c_['fg']}}}"
+                            f"QPushButton:hover{{border:1px solid {c_['ac']}}}"
+                            f"QPushButton:checked{{border:2px solid {c_['ac']}}}"
+                            f"QPushButton:disabled{{color:{c_['mu']}}}")
             b.clicked.connect(fn)
             cards.addWidget(b)
         card('Use devices from the capture',
@@ -798,14 +895,16 @@ class DiscoverView(QWidget):
         w.setLayout(cards)
         p.add(w)
         if self.ex.busy == 'scan':
-            p.add(label('⏳ ' + self.ex.msg, muted=True))
+            p.add(U.busy_row(self.ex.msg))
         if pk:
             L = [d for d in AL if d['ex']] if pk['src'] == 'scan' else cap
             sl = [d['id'] for d in L if d['key'] in pk['sel']]
             box = QFrame()
             box.setObjectName('pick')
-            box.setStyleSheet(f"QFrame#pick{{border:1px solid {colors()['bd']};border-radius:10px}}")
+            box.setStyleSheet(U.surface_css('pick'))
             bv = QVBoxLayout(box)
+            bv.setContentsMargins(16, 14, 16, 14)
+            bv.setSpacing(8)
             hr = QHBoxLayout()
             hr.addWidget(label('Discovering…' if run else 'Choose devices on the left', bold=True, wrap=False))
             hr.addWidget(label(f'{len(sl)} of {len(L)} selected', muted=True, wrap=False))
@@ -826,9 +925,9 @@ class DiscoverView(QWidget):
                 st = QPushButton('Stop')
                 st.clicked.connect(lambda: (pk.__setitem__('stop', True), setattr(self.ex, 'stop', True)))
                 fr.addWidget(st)
-                fr.addWidget(label(f"⏳ Reading {run['i']} of {run['n']}" + (f" – device {run['cur']}" if run['cur'] else '') + '…', muted=True))
+                fr.addWidget(U.busy_row(f"Reading {run['i']} of {run['n']}" + (f" – device {run['cur']}" if run['cur'] else '') + '…'))
             else:
-                go = QPushButton(f"Discover {len(sl)} device{'' if len(sl) == 1 else 's'}" if sl else 'Discover')
+                go = U.primary(QPushButton(f"Discover {len(sl)} device{'' if len(sl) == 1 else 's'}" if sl else 'Discover'))
                 go.setDefault(True)
                 go.setEnabled(bool(sl))
                 go.clicked.connect(self.run_picked)
@@ -852,26 +951,48 @@ class DiscoverView(QWidget):
             ww.setLayout(r)
             p.add(ww)
 
-    def info_grid(self, items):
+    def info_grid(self, items, tech=()):
+        """A card of 'name  value' rows; technical rows stay hidden until 'Technical details' is opened."""
         f = QFrame()
         f.setObjectName('info')
-        f.setStyleSheet(f"QFrame#info{{background:{colors()['hd']};border-radius:10px}}")
+        f.setStyleSheet(U.surface_css('info'))
         g = QGridLayout(f)
-        g.setContentsMargins(16, 12, 16, 12)
-        g.setHorizontalSpacing(18)
+        g.setContentsMargins(18, 14, 18, 14)
+        g.setHorizontalSpacing(20)
+        g.setVerticalSpacing(8)
         for i, (k, v) in enumerate(items):
             g.addWidget(label(k, muted=True, wrap=False), i, 0, Qt.AlignmentFlag.AlignTop)
             g.addWidget(label(str(v), sel=True), i, 1)
+        tech = [(k, v) for k, v in tech if v]
+        if tech:
+            n = len(items)
+            b = U.disclose(QToolButton(), 'Technical details')
+            b.setChecked(getattr(self, 'tech', False))
+            g.addWidget(b, n, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
+            rows = []
+            for j, (k, v) in enumerate(tech):
+                a, c = label(k, muted=True, wrap=False), label(str(v), sel=True)
+                g.addWidget(a, n + 1 + j, 0, Qt.AlignmentFlag.AlignTop)
+                g.addWidget(c, n + 1 + j, 1)
+                rows += [a, c]
+            for w in rows:
+                w.setVisible(b.isChecked())
+            b.toggled.connect(lambda on: (setattr(self, 'tech', on), [w.setVisible(on) for w in rows]))
         g.setColumnStretch(1, 1)
         f.setMaximumWidth(760)
         return f
 
     def device_page(self, p, en, e):
         busy = self.ex.busy
-        p.add(label(f"Device {en['id']}" + (f" – {en['name']}" if en['name'] else ''), bold=True, size=17))
-        p.add(label(' · '.join(x for x in [en['vendor'], en['model']] if x), muted=True))
+        nm_ = dev_name(en['name'], en['id'])
+        p.add(label(nm_ or f"Device {en['id']}", bold=True, size=17))
+        p.add(label(' · '.join(str(x) for x in [f"Device {en['id']}" if nm_ else '', en['vendor'], en['model']] if x), muted=True))
         r = QHBoxLayout()
-        b = QPushButton('Refresh points' if e and e.get('objs') else 'Read points')
+        r.setSpacing(8)
+        has = bool(e and e.get('objs'))
+        b = QPushButton('Refresh points' if has else 'Read points')
+        if not has:
+            U.primary(b)
         b.setEnabled(not busy and bool(e or en['cap']))
         b.clicked.connect(lambda: self.read_points(en))
         r.addWidget(b)
@@ -892,18 +1013,23 @@ class DiscoverView(QWidget):
         ww = QWidget()
         ww.setLayout(r)
         p.add(ww)
-        if not (e and e.get('objs')):
+        reading = bool(busy == 'browse' and e and not e.get('objs') and e.get('pm'))
+        if not (e and e.get('objs')) and not reading:
             p.add(label('Press Read points to read this device’s objects and build its tree of points.', muted=True))
         info = [('Address', E.Explorer.addr(e) if e else en['ip']), ('Vendor', en['vendor']), ('Model', en['model']),
-                ('Firmware', e and e.get('fw')), ('Software', e and e.get('sw')), ('Location', e and e.get('loc')),
-                ('Description', e and e.get('desc')), ('Max APDU', e and e.get('mx')), ('Status', e and e.get('st'))]
-        p.add(self.info_grid([(k, v) for k, v in info if v]))
+                ('Location', e and e.get('loc')), ('Description', e and e.get('desc')), ('Status', e and e.get('st'))]
+        tech = [('Firmware', e and e.get('fw')), ('Software', e and e.get('sw')), ('Max APDU', e and e.get('mx')),
+                ('Device object', f"device {en['id']}"), ('Vendor ID', (en['cap'] or {}).get('v'))]
+        p.add(self.info_grid([(k, v) for k, v in info if v], tech))
+        if reading:
+            p.add(heading('Points', 13))
+            p.add(U.Skeleton(6))
         al = (e or {}).get('alarms')
         if al is not None or (e or {}).get('alarms_busy'):
             c = colors()
-            p.add(heading('Active alarms', 12))
+            p.add(heading('Active alarms', 13))
             if (e or {}).get('alarms_busy'):
-                p.add(label('⏳ Asking the device for its alarms…', muted=True))
+                p.add(U.busy_row('Asking the device for its alarms…'))
             elif al.get('err') and not al['items']:
                 er = label(f"Could not read the alarms: {al['err']}")
                 er.setStyleSheet(f"color:{c['se']}")
@@ -926,7 +1052,7 @@ class DiscoverView(QWidget):
                 p.add(t)
         cats = self.ex.cats(e) if e else []
         if cats:
-            p.add(heading('Points', 12))
+            p.add(heading('Points', 13))
             t = Table(['Category', 'Points'])
             t.fill([[E.cat_name(ty), len(os_)] for ty, os_ in cats], [{'k': e['key'], 't': ty} for ty, _ in cats])
             t.rowActivated.connect(lambda n: n and (self.open.add(f"{n['k']}|{n['t']}"), self.go_node(n)))
@@ -934,10 +1060,12 @@ class DiscoverView(QWidget):
             p.add(t)
         self.wlog(p, en['id'])
 
-    def cat_page(self, p, en, e, ty):
+    def cat_page(self, p, en, e, ty, sel=None):
         os_ = [o for o in e.get('objs') or [] if o['ty'] == ty]
         p.add(label(E.cat_name(ty), bold=True, size=17))
-        p.add(label(f"{len(os_)} point{'' if len(os_) == 1 else 's'} in device {en['id']}" + (f" “{en['name']}”" if en['name'] else ''), muted=True))
+        nm_ = dev_name(en['name'], en['id'])
+        p.add(label(f"{len(os_)} point{'' if len(os_) == 1 else 's'} in device {en['id']}" + (f" “{nm_}”" if nm_ else '')
+                    + ' · click a point to see its details', muted=True))
         r = QHBoxLayout()
         b = QPushButton('Refresh values')
         b.setEnabled(not self.ex.busy)
@@ -953,6 +1081,12 @@ class DiscoverView(QWidget):
                  'commandable – double-click to open' if o['ty'] in E.CMD_T else ''] for o in os_],
                [{'k': e['key'], 'o': o['o']} for o in os_])
         t.rowActivated.connect(lambda n: n and self.go_node(n))
+        t.cellClicked.connect(lambda r, _c, t=t: QTimer.singleShot(0, lambda n=t._data[r]: n and n != self.node and self.go_node(n)))
+        if sel is not None:
+            i = next((i for i, o in enumerate(os_) if o['o'] == sel), -1)
+            if i >= 0:
+                t.selectRow(i)
+                QTimer.singleShot(0, lambda t=t, i=i: t.scrollTo(t.model().index(i, 0)))
         t.fit_height(40)
         p.add(t)
         self.wlog(p, en['id'])
@@ -972,23 +1106,22 @@ class DiscoverView(QWidget):
         # summary
         s = QWidget()
         sv = QVBoxLayout(s)
-        hd = QHBoxLayout()
-        hd.addWidget(label(f'BACnet {tn}', bold=True, wrap=False))
-        hd.addStretch(1)
-        hd.addWidget(label(f'RefName: {ab.lower()}{o["inst"]}', wrap=False, sel=True))
-        sv.addLayout(hd)
-        mid = QHBoxLayout()
-        mid.addStretch(1)
-        lcd = QLabel(val or '—')
-        lcd.setMinimumSize(170, 78)
-        lcd.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lcd.setStyleSheet("QLabel{background:#000;color:#c9d33a;border:3px solid #1d1d1d;border-radius:3px;"
-                          "font:600 20px 'Cascadia Mono',Consolas;padding:0 14px}")
-        mid.addWidget(lcd)
-        mid.addSpacing(16)
-        mid.addWidget(label(f'Present Value  =  {val or "?"}', bold=True, wrap=False, sel=True))
-        mid.addStretch(1)
-        sv.addLayout(mid)
+        sv.setContentsMargins(4, 12, 4, 4)
+        sv.setSpacing(10)
+        sv.addWidget(label(f'{tn} · {ab.lower()}{o["inst"]}', muted=True, wrap=False, sel=True))
+        big = QLabel(val or '—')
+        bf = big.font()
+        bf.setPointSizeF(26)
+        bf.setWeight(QFont.Weight.DemiBold)
+        big.setFont(bf)
+        big.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        big.setToolTip('Present value')
+        sv.addWidget(big)
+        flags = (pd or {}).get('flags')
+        if flags and flags != 'normal':
+            fl_ = label(f'⚠ {flags}', bold=True)
+            fl_.setStyleSheet(f"color:{colors()['se']}")
+            sv.addWidget(fl_)
         f = QFormLayout()
         for k, v in (('Display Name:', nm), ('Description:', o['desc'] or '')):
             le = QLineEdit(v)
@@ -1001,8 +1134,11 @@ class DiscoverView(QWidget):
         # details
         dw = QWidget()
         dv = QVBoxLayout(dw)
+        dv.setContentsMargins(4, 12, 4, 4)
+        dv.setSpacing(8)
         if not pd:
-            dv.addWidget(label('⏳ Reading the details from the device…', muted=True))
+            dv.addWidget(U.busy_row('Reading the details from the device…'))
+            dv.addWidget(U.Skeleton(5))
         elif pd.get('err'):
             er = label(pd['err'])
             er.setStyleSheet(f"color:{colors()['se']}")
@@ -1020,18 +1156,27 @@ class DiscoverView(QWidget):
         dv.addLayout(f1)
         dv.addLayout(self._point_buttons(en, e, o, wr, details=True))
 
-        def section(t):
-            b = label(t, bold=True)
-            b.setStyleSheet('background:#6b6b6e;color:white;padding:5px 12px')
-            dv.addWidget(b)
-        section('Calibration')
+        def section(t, into=None):
+            b = label(t.upper(), bold=True, muted=True, wrap=False)
+            f_ = b.font()
+            f_.setPointSizeF(8)
+            f_.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
+            b.setFont(f_)
+            b.setContentsMargins(0, 10, 0, 0)
+            (into or dv).addWidget(b)
+        # the everyday fields first; calibration, BACnet configuration and the property list are technical
+        tw = QWidget()
+        tv_ = QVBoxLayout(tw)
+        tv_.setContentsMargins(0, 0, 0, 0)
+        tv_.setSpacing(8)
+        section('Calibration', tv_)
         f2 = QFormLayout()
         f2.addRow('COV Increment:', ro(g.get('cov', '')))
         f2.addRow('Resolution:', ro(g.get('res') or '?'))
         f2.addRow('Scaling Range – Minimum:', ro(g.get('min', '')))
         f2.addRow('Scaling Range – Maximum:', ro(g.get('max', '')))
-        dv.addLayout(f2)
-        section('BACnet Configuration')
+        tv_.addLayout(f2)
+        section('BACnet Configuration', tv_)
         f3 = QFormLayout()
         f3.addRow('Object Name:', ro(nm))
         f3.addRow('Object Id:', ro(f"{tn} {o['inst']}"))
@@ -1049,7 +1194,7 @@ class DiscoverView(QWidget):
         f3.addRow('Out of Service:', oos)
         f3.addRow('Reliability:', ro(g.get('rel') or '?'))
         f3.addRow('Profile Name:', ro(g.get('prof') or '?'))
-        dv.addLayout(f3)
+        tv_.addLayout(f3)
         section('Alarm & status')
         f5 = QFormLayout()
         flags = g.get('flags', '')
@@ -1068,17 +1213,17 @@ class DiscoverView(QWidget):
         rr = QHBoxLayout()
         rr.addWidget(ra)
         rr.addStretch(1)
-        dv.addLayout(rr)
-        plb = QToolButton(text='Property List ' + ('▴' if o.get('pl') else '▾'))
+        plb = U.disclose(QToolButton(), 'Property list')
+        plb.setChecked(bool(o.get('pl')))
         plb.clicked.connect(lambda: self._toggle_pl(e, o))
-        dv.addWidget(plb)
+        tv_.addWidget(plb)
         if o.get('pl'):
             pl = QLabel('\n'.join(o['pl']))
             pl.setFont(QFont('Cascadia Mono', 9))
             pl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            dv.addWidget(pl)
+            tv_.addWidget(pl)
         elif o.get('pll'):
-            dv.addWidget(label('Reading…', muted=True))
+            tv_.addWidget(U.busy_row('Reading…'))
         if wr:
             pa = g.get('pa')
             cp = next((i + 1 for i, v in enumerate(pa) if v['a']), 0) if pa else 0
@@ -1099,17 +1244,24 @@ class DiscoverView(QWidget):
             else:
                 dv.addWidget(label('?', muted=True))
             dv.addWidget(label('To clear a priority level, use Write… and choose Release at that priority.', muted=True))
+        tb = U.disclose(QToolButton(), 'Technical details')
+        tb.setChecked(getattr(self, 'tech', False) or bool(o.get('pl')))
+        tw.setVisible(tb.isChecked())
+        tb.toggled.connect(lambda on: (setattr(self, 'tech', on), tw.setVisible(on)))
+        dv.addWidget(tb)
+        dv.addWidget(tw)
+        dv.addLayout(rr)
         dv.addStretch(1)
         tabs.addTab(dw, 'Details')
         tabs.setCurrentIndex(self.ptab)
         tabs.currentChanged.connect(lambda i: setattr(self, 'ptab', i))
-        hdr = label(f"{en['name'] or 'Device ' + str(en['id'])}  /  {tn}  /  {nm}", bold=True)
-        p.add(hdr)
+        nm_ = dev_name(en['name'], en['id'])
+        p.add(label(f"{nm_ or 'Device ' + str(en['id'])}  ·  {tn}", muted=True))
         p.add(tabs)
-        self.wlog(p, en['id'])
 
     def _point_buttons(self, en, e, o, wr, details=False):
         r = QHBoxLayout()
+        r.setSpacing(8)
         b = QPushButton('Read now')
         b.setEnabled(not self.ex.busy)
         b.clicked.connect(lambda: self.ex.run(self.ex.read_one, e, o))
@@ -1142,7 +1294,7 @@ class DiscoverView(QWidget):
         L = [w for w in self.ex.wlog if dev_id is None or w['dev'] == dev_id]
         if not L:
             return
-        p.add(heading('Write log' + (' – this device' if dev_id is not None else ''), 12))
+        p.add(heading('Write log' + (' – this device' if dev_id is not None else ''), 13))
         b = QPushButton('Export write log (.csv)')
         b.clicked.connect(lambda: self.save_csv('bacnet-write-log.csv', self.csv_wlog()))
         r = QHBoxLayout()
@@ -1430,7 +1582,7 @@ def all_props_dialog(view, dev, o):
     v = QVBoxLayout(d)
     v.addWidget(label(f"Device {dev['id']}" + (f" “{dev_name(dev.get('name'), dev['id'])}”" if dev_name(dev.get('name'), dev['id']) else '') +
                       f" · {E.sd_ty(o['ty'])} {o['inst']} · read just now from the device (read-only)", muted=True))
-    msg = label('⏳ Reading every property…', muted=True)
+    msg = label('Reading every property…', muted=True)
     v.addWidget(msg)
     t = Table(['Property', 'Value'])
     t.setWordWrap(True)
@@ -1614,7 +1766,7 @@ def read_now(win, d, ob):
     dlg.setWindowTitle(f"Device {d['id']}" + (f' “{lab}”' if lab else '') + f" – {E.sd_ty(ob['ty'])} {ob['inst']}")
     v = QVBoxLayout(dlg)
     v.addWidget(label('Read just now from the network (read-only).', muted=True))
-    body = QLabel('⏳ Reading…')
+    body = QLabel('Reading…')
     body.setTextFormat(Qt.TextFormat.RichText)
     body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     body.setWordWrap(True)
@@ -1628,7 +1780,7 @@ def read_now(win, d, ob):
     row = {'o': ob['o'], 'ty': ob['ty'], 'inst': ob['inst'], 'name': '', 'val': '', 'u': '', 'desc': ''}
 
     def go():
-        body.setText('⏳ Reading…')
+        body.setText('Reading…')
 
         def work():
             r = ex.req(e, E.ex_rpm([[ob['o'], [77, 85, 117, 28]]]), 3.0)

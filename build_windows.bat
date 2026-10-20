@@ -23,6 +23,7 @@ echo Building the application...
   --add-data "bacnet_inspector.ico;." ^
   --add-data "version.txt;." ^
   --add-data "update_url.txt;." ^
+  --add-data "release_notes.txt;." ^
   --add-binary "tools\putty\putty.exe;putty" ^
   --add-data "tools\putty\LICENCE;putty" ^
   --add-data "tools\putty\putty.chm;putty" ^

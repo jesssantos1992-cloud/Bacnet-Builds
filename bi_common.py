@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLay
                                QToolTip, QVBoxLayout, QWidget)
 
 MONO = 'Cascadia Mono, Consolas, monospace'
+ROW_H = 28                     # tree and table row height
+# type scale (points): display numbers, page titles, section headings; body text is the app font (10 pt)
+DISPLAY, TITLE, HEADLINE = 22, 17, 13
 
 
 def is_dark():
@@ -36,10 +39,12 @@ def colors():
     if is_dark():
         return {'bg': '#1c1c1e', 'fg': '#f5f5f7', 'mu': '#98989d', 'bd': '#38383a', 'hd': '#2a2a2c', 'b': '#1e2631',
                 'm': '#1d2a22', 'bad': '#3b1f22', 'ac': '#0a84ff', 'se': '#ff453a', 'wa': '#ff9f0a', 'no': '#30d158',
-                'hit': '#fde68a', 'ip': '#23324f', 'mac': '#4a3416', 'net': '#3a2350', 'id': '#163d24', 'teal': '#19a899'}
+                'hit': '#fde68a', 'ip': '#23324f', 'mac': '#4a3416', 'net': '#3a2350', 'id': '#163d24',
+                'card': '#2a2a2c', 'side': '#252527', 'hair': 'rgba(255,255,255,0.08)'}
     return {'bg': '#ffffff', 'fg': '#1d1d1f', 'mu': '#6e6e73', 'bd': '#e3e3e8', 'hd': '#f5f5f7', 'b': '#f3f7ff',
             'm': '#f3faf6', 'bad': '#ffecec', 'ac': '#0071e3', 'se': '#d70015', 'wa': '#b86e00', 'no': '#248a3d',
-            'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb', 'teal': '#0b8f83'}
+            'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb',
+            'card': '#ffffff', 'side': '#eaeaee', 'hair': 'rgba(0,0,0,0.08)'}
 
 
 SEV_LABEL = {'SERIOUS': 'serious', 'WARNING': 'warnings', 'NOTE': 'notes'}
@@ -113,8 +118,23 @@ class Labels:
 LABELS = None          # set by the main window; used by HighlightDelegate
 
 
+class RowDelegate(QStyledItemDelegate):
+    """Gives tree / list rows a comfortable height."""
+
+    def __init__(self, parent=None, row_h=ROW_H):
+        super().__init__(parent)
+        self.row_h = row_h
+
+    def sizeHint(self, opt, ix):
+        s = super().sizeHint(opt, ix)
+        if self.row_h and s.height() < self.row_h:
+            s.setHeight(self.row_h)
+        return s
+
+
 class HighlightDelegate(QStyledItemDelegate):
     """Draws a table / tree cell with IP addresses, MACs, networks and device IDs highlighted."""
+    row_h = None
 
     def paint(self, p, opt, ix):
         o = QStyleOptionViewItem(opt)
@@ -128,7 +148,9 @@ class HighlightDelegate(QStyledItemDelegate):
         st.drawControl(QStyle.ControlElement.CE_ItemViewItem, o, p, w)
         r = st.subElementRect(QStyle.SubElement.SE_ItemViewItemText, o, w)
         sel = bool(o.state & QStyle.StateFlag.State_Selected)
-        fg = o.palette.color(QPalette.ColorRole.HighlightedText if sel else QPalette.ColorRole.Text)
+        fg = o.palette.color(QPalette.ColorRole.Text)      # the Windows 11 style marks selection with a light tint
+        if sel and w is not None and w.style().name().lower() != 'windows11':
+            fg = o.palette.color(QPalette.ColorRole.HighlightedText)
         b = o.index.data(Qt.ItemDataRole.ForegroundRole)
         if b is not None and not sel:
             fg = b.color() if hasattr(b, 'color') else QColor(b)
@@ -156,13 +178,16 @@ class HighlightDelegate(QStyledItemDelegate):
             self.initStyleOption(o, ix)
             extra = s.width() - o.fontMetrics.horizontalAdvance(str(text))      # icon, indent and padding
             s.setWidth(int(self._doc(str(text), o.font, QColor('black')).idealWidth()) + max(extra, 12))
+        if self.row_h and s.height() < self.row_h:
+            s.setHeight(self.row_h)
         return s
 
 
 def colors_light():
     return {'bg': '#ffffff', 'fg': '#1d1d1f', 'mu': '#6e6e73', 'bd': '#e3e3e8', 'hd': '#f5f5f7', 'b': '#f3f7ff',
             'm': '#f3faf6', 'bad': '#ffecec', 'ac': '#0071e3', 'se': '#d70015', 'wa': '#b86e00', 'no': '#248a3d',
-            'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb', 'teal': '#0b8f83'}
+            'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb',
+            'card': '#ffffff', 'side': '#eaeaee', 'hair': 'rgba(0,0,0,0.08)'}
 
 
 # ------------------------------------------------------- saved web pages --
@@ -311,14 +336,15 @@ class Table(QTableWidget):
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.verticalHeader().setVisible(False)
-        self.setAlternatingRowColors(True)
+        self.setAlternatingRowColors(False)
         self.setWordWrap(False)
         self.setShowGrid(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         hh = self.horizontalHeader()
         hh.setStretchLastSection(stretch_last)
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.verticalHeader().setDefaultSectionSize(24)
+        self.verticalHeader().setDefaultSectionSize(ROW_H + 2)
         self.setItemDelegate(HighlightDelegate(self))
         self._data = []
         self.itemActivated.connect(lambda it: self.rowActivated.emit(self._data[it.row()] if it.row() < len(self._data) else None))
@@ -328,8 +354,7 @@ class Table(QTableWidget):
         self.setRowCount(0)
         self.setRowCount(len(rows))
         self._data = list(data) if data is not None else [None] * len(rows)
-        bold = QFont(self.font())
-        bold.setBold(True)
+        bold = semibold(QFont(self.font()))
         mono = QFont('Cascadia Mono')
         mono.setStyleHint(QFont.StyleHint.Monospace)
         mono.setPointSizeF(self.font().pointSizeF() * .95)
@@ -393,16 +418,26 @@ def label(text='', wrap=True, muted=False, bold=False, size=None, rich=False, se
     if bold or size:
         f = w.font()
         if bold:
-            f.setBold(True)
+            f.setWeight(QFont.Weight.DemiBold)
         if size:
-            f.setPointSizeF(size)
+            f.setPointSizeF(type_size(size))
         w.setFont(f)
     if sel:
         w.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     return w
 
 
-def heading(text, size=11.5):
+def type_size(size):
+    """Snap a requested size onto the app's few type sizes."""
+    return DISPLAY if size >= 19 else TITLE if size >= 14 else HEADLINE if size >= 11 else size
+
+
+def semibold(f):
+    f.setWeight(QFont.Weight.DemiBold)
+    return f
+
+
+def heading(text, size=HEADLINE):
     return label(text, bold=True, size=size, wrap=True)
 
 
@@ -491,7 +526,7 @@ def flow_row(widgets, hspace=8, vspace=6):
 
 def summary_row(title, pills, extra=()):
     """'Title  [pill] [pill]' line at the top of a view (wraps on narrow windows)."""
-    t = label(title, bold=True, size=13, wrap=False)
+    t = label(title, bold=True, size=TITLE, wrap=False)
     return flow_row(([t] if title else []) + [Pill(text, sev) for text, sev in pills] + list(extra))
 
 
@@ -517,7 +552,7 @@ class Page(QWidget):
         self.inner = QWidget()
         self.scroll.setWidget(self.inner)
         h = QHBoxLayout(self.inner)
-        h.setContentsMargins(18, 14, 18, 24)
+        h.setContentsMargins(24, 16, 24, 24)
         self.col = QWidget()
         self.col.setMaximumWidth(max_width)
         h.addWidget(self.col, 1)
@@ -525,7 +560,7 @@ class Page(QWidget):
             h.addStretch(0)
         self.lay = QVBoxLayout(self.col)
         self.lay.setContentsMargins(0, 0, 0, 0)
-        self.lay.setSpacing(10)
+        self.lay.setSpacing(12)
 
     def clear(self):
         while self.lay.count():

@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
-from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
+import bi_ui as U
+from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
 
 VN = C.VN
@@ -132,7 +133,7 @@ def findings_html(win, F, for_export=False):
                 f'{lb("WHY IT MATTERS")}<p style="margin:0">{hl(f["y"])}</p>{lb("HOW TO TROUBLESHOOT")}{steps}')
         h.append(f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:18px"><tr>'
                  f'<td width="5" style="background-color:{col}"></td>'
-                 f'<td style="background-color:{c["hd"]}"><table width="100%" cellpadding="12"><tr><td>{body}</td></tr></table></td></tr></table>')
+                 f'<td style="background-color:{c["card"]}"><table width="100%" cellpadding="14"><tr><td>{body}</td></tr></table></td></tr></table>')
     return ''.join(h)
 
 
@@ -215,8 +216,8 @@ class DevicesView(BaseView):
     def __init__(self, win):
         super().__init__(win)
         v = QVBoxLayout(self)
-        v.setContentsMargins(18, 14, 18, 10)
-        v.setSpacing(8)
+        v.setContentsMargins(24, 16, 24, 12)
+        v.setSpacing(12)
         self.top = QHBoxLayout()
         v.addLayout(self.top)
         row = QHBoxLayout()
@@ -231,9 +232,12 @@ class DevicesView(BaseView):
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(self.COLS))
         self.tree.setHeaderLabels(self.COLS)
-        self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(True)
-        self.tree.setItemDelegate(HighlightDelegate(self.tree))
+        self.tree.setAnimated(True)
+        self.tree.setFrameShape(QFrame.Shape.NoFrame)
+        hd = HighlightDelegate(self.tree)
+        hd.row_h = 28
+        self.tree.setItemDelegate(hd)
         self.tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.tree.setColumnWidth(0, 320)
         for i, w in enumerate([200, 220, 180, 140, 100], 1):
@@ -282,8 +286,7 @@ class DevicesView(BaseView):
             pills.append((C.pl(dup, 'duplicate ID'), 'SERIOUS'))
         self.top.addWidget(summary_row('Network layout', pills))
         self.tree.clear()
-        bold = QFont(self.tree.font())
-        bold.setBold(True)
+        bold = semibold(QFont(self.tree.font()))
         mu = QColor(colors()['mu'])
         se = QColor(colors()['se'])
 
@@ -414,8 +417,8 @@ class ChangesView(BaseView):
     def __init__(self, win):
         super().__init__(win)
         v = QVBoxLayout(self)
-        v.setContentsMargins(18, 14, 18, 10)
-        v.setSpacing(8)
+        v.setContentsMargins(24, 16, 24, 12)
+        v.setSpacing(12)
         self.top = QHBoxLayout()
         v.addLayout(self.top)
         v.addWidget(hint('Every change request sent on the network: who sent it, which device and point, the new value, the '
@@ -938,10 +941,10 @@ def tile(big, title, small, go=False):
     c = colors()
     col = c['no'] if go else c['fg']
     f.setObjectName('tile')
-    f.setStyleSheet(f"QFrame#tile{{background:{'rgba(36,138,61,0.12)' if go else c['hd']};border:1px solid {c['bd']};border-radius:10px}}")
+    f.setStyleSheet(f"QFrame#tile{{background:{'rgba(52,199,89,0.14)' if go else c['card']};border-radius:12px}}")
     v = QVBoxLayout(f)
-    v.setContentsMargins(14, 10, 14, 10)
-    v.setSpacing(1)
+    v.setContentsMargins(16, 12, 16, 12)
+    v.setSpacing(2)
     b = label(str(big), bold=True, size=20, wrap=False)
     b.setStyleSheet(f'color:{col}')
     v.addWidget(b)
@@ -954,7 +957,7 @@ def tiles(items):
     w = QWidget()
     g = QGridLayout(w)
     g.setContentsMargins(0, 0, 0, 0)
-    g.setSpacing(10)
+    g.setSpacing(12)
     for i, t in enumerate(items):
         g.addWidget(t, 0, i)
     return w
@@ -963,9 +966,9 @@ def tiles(items):
 def card():
     f = QFrame()
     f.setObjectName('card')
-    f.setStyleSheet(f"QFrame#card{{border:1px solid {colors()['bd']};border-radius:10px}}")
+    f.setStyleSheet(U.surface_css('card'))
     v = QVBoxLayout(f)
-    v.setContentsMargins(14, 12, 14, 12)
+    v.setContentsMargins(16, 14, 16, 14)
     v.setSpacing(8)
     return f, v
 
@@ -976,7 +979,7 @@ def list_box(text, copy_fn, toast):
     v = QVBoxLayout(w)
     v.setContentsMargins(0, 0, 0, 0)
     row = QHBoxLayout()
-    b = QToolButton(text='Show as a list ▾', checkable=True)
+    b = U.disclose(QToolButton(), 'Show as a list')
     row.addWidget(b)
     row.addStretch(1)
     if copy_fn:
@@ -990,7 +993,7 @@ def list_box(text, copy_fn, toast):
     t.setFont(QFont('Cascadia Mono', 9))
     t.hide()
     v.addWidget(t)
-    b.toggled.connect(lambda on: (t.setVisible(on), b.setText('Show as a list ' + ('▴' if on else '▾'))))
+    b.toggled.connect(t.setVisible)
     return w
 
 
@@ -1008,9 +1011,10 @@ def legend_row(items):
         sub.addWidget(label(expl, wrap=False, muted=True))
         parts.append(it)
     w = flow_row(parts, 18, 6)
-    w.layout().setContentsMargins(10, 6, 10, 6)
+    w.layout().setContentsMargins(12, 8, 12, 8)
     w.setObjectName('leg')
-    w.setStyleSheet(f"QWidget#leg{{border:1px solid {colors()['bd']};border-radius:8px}}")
+    w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    w.setStyleSheet(f"QWidget#leg{{background:{colors()['card']};border-radius:10px}}")
     return w
 
 
@@ -1021,21 +1025,19 @@ class Settings(QWidget):
         super().__init__()
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        self.btn = QToolButton(text=title + ' ▾', checkable=True)
+        self.btn = U.disclose(QToolButton(), title)
         self.btn.setChecked(open_)
-        f = self.btn.font()
-        f.setBold(True)
-        self.btn.setFont(f)
+        self.btn.setFont(semibold(self.btn.font()))
         v.addWidget(self.btn)
         self.body = QFrame()
         self.body.setObjectName('set')
-        self.body.setStyleSheet(f"QFrame#set{{border:1px solid {colors()['bd']};border-radius:10px}}")
+        self.body.setStyleSheet(U.surface_css('set'))
         self.grid = QGridLayout(self.body)
-        self.grid.setContentsMargins(14, 10, 14, 10)
+        self.grid.setContentsMargins(16, 12, 16, 12)
         self.grid.setHorizontalSpacing(18)
         v.addWidget(self.body)
         self.body.setVisible(open_)
-        self.btn.toggled.connect(lambda on: (self.body.setVisible(on), self.btn.setText(title + (' ▴' if on else ' ▾'))))
+        self.btn.toggled.connect(self.body.setVisible)
 
     def field(self, r, c, title, w, small=''):
         box = QVBoxLayout()

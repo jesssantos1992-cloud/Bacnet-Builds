@@ -16,9 +16,8 @@ from PySide6.QtCore import (QAbstractTableModel, QByteArray, QEvent, QModelIndex
 from PySide6.QtGui import (QAction, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap,
                            QShortcut)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
-                               QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
+                               QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QPlainTextEdit, QPushButton, QSizePolicy, QSplitter, QStackedWidget, QSystemTrayIcon,
                                QTabBar, QTableView, QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem,
@@ -26,7 +25,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 
 import bacnet_live as BL
 import bi_core as C
-from bi_common import HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark, label, stamp
+import bi_ui as U
+from bi_common import (HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
+                       label, semibold, stamp)
 from bi_store import Store
 
 APP_NAME = 'BACnet Inspector'
@@ -216,8 +217,8 @@ class PacketsPane(QWidget):
         # search + quick filters
         bar = QWidget()
         bl = QHBoxLayout(bar)
-        bl.setContentsMargins(10, 6, 10, 6)
-        bl.setSpacing(6)
+        bl.setContentsMargins(12, 8, 12, 8)
+        bl.setSpacing(8)
         self.sq = QLineEdit()
         self.sq.setPlaceholderText('Search: device ID, IP or network…')
         self.sq.setToolTip('Type a device ID, an IP address, a network number or any word. Several words must all match.\n'
@@ -225,22 +226,18 @@ class PacketsPane(QWidget):
         self.sq.setClearButtonEnabled(True)
         self.sq.setFixedWidth(240)
         bl.addWidget(self.sq)
-        self.mode_hl = QToolButton(text='Highlight', checkable=True)
-        self.mode_f = QToolButton(text='Filter', checkable=True)
-        g = QButtonGroup(self)
-        g.setExclusive(True)
-        for b in (self.mode_hl, self.mode_f):
-            g.addButton(b)
-            bl.addWidget(b)
+        self.mode_hl = QToolButton(text='Highlight')
+        self.mode_f = QToolButton(text='Filter')
+        self.mode_hl.setToolTip('Highlight the matching packets and step through them')
+        self.mode_f.setToolTip('Show only the matching packets')
+        bl.addWidget(U.Segmented([self.mode_hl, self.mode_f]))
         m = (win.store.get('bi_sq') or {}).get('m', 'hl')
         (self.mode_f if m == 'f' else self.mode_hl).setChecked(True)
         self.sqn = label('', wrap=False, muted=True)
         self.sqn.setMinimumWidth(80)
         bl.addWidget(self.sqn)
-        self.sqp = QToolButton(text='▲')
-        self.sqp.setToolTip('Previous match (Shift+Enter)')
-        self.sqd = QToolButton(text='▼')
-        self.sqd.setToolTip('Next match (Enter)')
+        self.sqp = U.tool(QToolButton(), 'up', tip='Previous match (Shift+Enter)')
+        self.sqd = U.tool(QToolButton(), 'down', tip='Next match (Enter)')
         bl.addWidget(self.sqp)
         bl.addWidget(self.sqd)
         sep = QFrame()
@@ -270,7 +267,7 @@ class PacketsPane(QWidget):
         self.tv.setWordWrap(False)
         self.tv.verticalHeader().setVisible(False)
         self.tv.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.tv.verticalHeader().setDefaultSectionSize(21)
+        self.tv.verticalHeader().setDefaultSectionSize(24)
         hh = self.tv.horizontalHeader()
         hh.setStretchLastSection(True)
         hh.setSectionsClickable(True)
@@ -289,6 +286,7 @@ class PacketsPane(QWidget):
         self.det.setHeaderHidden(True)
         self.det.setFont(self.model.mono)
         self.det.setUniformRowHeights(True)
+        self.det.setAnimated(True)
         self.det.setItemDelegate(HighlightDelegate(self.det))
         self.det.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         cp = QAction('Copy', self.det)
@@ -304,9 +302,7 @@ class PacketsPane(QWidget):
         self.bot.addWidget(self.det)
         self.bot.addWidget(self.hex)
         self.bot.setSizes([600, 420])
-        self.empty = QLabel()
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty.setWordWrap(True)
+        self.empty = U.EmptyState()
         self.top = QStackedWidget()
         self.top.addWidget(self.empty)
         self.top.addWidget(self.tv)
@@ -321,7 +317,8 @@ class PacketsPane(QWidget):
             self.split.restoreState(QByteArray.fromBase64(st.encode()))
         self.split.splitterMoved.connect(lambda *_: win.store.set('bi_split', bytes(self.split.saveState().toBase64()).decode()))
         lay.addWidget(self.split, 1)
-        self.set_empty('Open or drop a .pcap / .pcapng capture.\nDecodes BACnet/IP and BACnet MS/TP. Everything stays on your computer.')
+        self.set_empty('Open a capture', 'Drop a .pcap or .pcapng file here, or open one. BACnet/IP and MS/TP are decoded on '
+                       'this computer – nothing is uploaded.', 'file', [('Open capture…', win.open_files)])
         # state
         self.V = []
         self.HI = []
@@ -409,8 +406,8 @@ class PacketsPane(QWidget):
             self.build_chips()
 
     # ---------------------------------------------------------------- list --
-    def set_empty(self, text):
-        self.empty.setText(text)
+    def set_empty(self, title, text='', icon='file', buttons=None, busy=False):
+        self.empty.set(icon, title, text, [] if buttons is None else buttons, busy)
 
     def show_list(self, on):
         self.top.setCurrentIndex(1 if on else 0)
@@ -562,8 +559,7 @@ class PacketsPane(QWidget):
         self.det.clear()
         lz = self.win.labels.lz
         top = QTreeWidgetItem(self.det, [f'Frame {r.no}: {r.len} bytes' + (f' · note: {r.note}' if r.note else '')])
-        f = top.font(0)
-        f.setBold(True)
+        f = semibold(top.font(0))
         top.setFont(0, f)
         parent = None
         for lvl, s in C.detail_tree(r):
@@ -657,8 +653,7 @@ class LivePanel(QWidget):
         self.ifc.setMinimumWidth(320)
         self.ifc.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         row.addWidget(self.ifc, 1)
-        self.rf = QToolButton(text='↻')
-        self.rf.setToolTip('Look for adapters again')
+        self.rf = U.tool(QToolButton(), 'refresh', tip='Look for adapters again')
         row.addWidget(self.rf)
         self.bdl = label('Baud', wrap=False)
         self.bd = QComboBox()
@@ -685,9 +680,9 @@ class LivePanel(QWidget):
         row.addWidget(self.follow)
         self.ls = QLabel('Stopped')
         row.addWidget(self.ls)
-        self.ask_b = QToolButton(text='Ask the network ▾', checkable=True)
+        self.ask_b = U.disclose(QToolButton(), 'Ask the network')
         self.ask_b.setToolTip('Send Who-Is, Who-Is-Router and similar messages')
-        self.opt_b = QToolButton(text='More options ▾', checkable=True)
+        self.opt_b = U.disclose(QToolButton(), 'More options')
         row.addWidget(self.ask_b)
         row.addWidget(self.opt_b)
         v.addLayout(row)
@@ -737,8 +732,8 @@ class LivePanel(QWidget):
         self.err.setStyleSheet(f"color:{colors()['se']}")
         self.err.hide()
         v.addWidget(self.err)
-        self.ask_b.toggled.connect(lambda on: (self.ask.setVisible(on), self.ask_b.setText('Ask the network ' + ('▴' if on else '▾'))))
-        self.opt_b.toggled.connect(lambda on: (self.opt.setVisible(on), self.opt_b.setText('More options ' + ('▴' if on else '▾'))))
+        self.ask_b.toggled.connect(self.ask.setVisible)
+        self.opt_b.toggled.connect(self.opt.setVisible)
         self.ifc.currentIndexChanged.connect(self.if_changed)
         self.rf.clicked.connect(lambda: self.win.load_interfaces(toast=True))
         self.bdt.clicked.connect(self.win.detect_baud)
@@ -795,30 +790,9 @@ class LivePanel(QWidget):
 
 
 # ============================================================ side bar icons --
-ICONS = {
-    'p': ('#0a84ff', 'M4 6h16M4 12h16M4 18h10'), 'f': ('#ff9500', 'M12 3l10 18H2zM12 10v5M12 18v.5'),
-    'd': ('#ff9500', 'M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4'),
-    'w': ('#ff9500', 'M4 20l4-1 11-11-3-3L5 16z'), 't': ('#ff9500', 'M5 20V10M12 20V4M19 20v-7'),
-    's': ('#ff9500', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2'),
-    'o': ('#ff9500', 'M5 12a10 10 0 0 1 14 0M8 15a6 6 0 0 1 8 0M12 19h.01'),
-    'g': ('#34c759', 'M12 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 7v5M12 12l-7 5M12 12l7 5'),
-    'a': ('#34c759', 'M5 9h14M5 15h14M10 4L8 20M16 4l-2 16'),
-    'n': ('#34c759', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18'),
-    'm': ('#af52de', 'M3 12h5l2-5 4 10 2-5h5'), 'b': ('#af52de', 'M4 17a8 8 0 1 1 16 0M12 17l4-5'),
-    'c': ('#8e8e93', 'M9 4h11v11H9zM4 9v11h11'), 'x': ('#0b8f83', 'M12 3a9 9 0 1 0 9 9M12 7a5 5 0 1 0 5 5M12 12l6-6')}
-
-
-def side_icon(k, px=40):
-    col, path = ICONS[k]
-    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><rect width="20" height="20" rx="5.5" fill="{col}"/>'
-           f'<g transform="translate(3.5,3.5) scale(0.5417)"><path d="{path}" fill="none" stroke="white" stroke-width="2.2" '
-           f'stroke-linecap="round" stroke-linejoin="round"/></g></svg>')
-    pm = QPixmap(px, px)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    QSvgRenderer(QByteArray(svg.encode())).render(p)
-    p.end()
-    return QIcon(pm)
+def side_icon(k):
+    """Sidebar icon: a thin line drawing in the accent colour."""
+    return U.icon(k, colors()['ac'], 18, 1.7)
 
 
 SIDE = [(None, None), ('p', 'Packets'), ('Analyze', None), ('f', 'Findings'), ('d', 'Devices'), ('w', 'Changes'),
@@ -889,101 +863,95 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------------- layout --
     def build_ui(self):
-        c = colors()
         root = QWidget()
         self.setCentralWidget(root)
         h = QHBoxLayout(root)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(0)
+        # sidebar: a title, then the views grouped under small headings
+        self.sidew = QFrame()
+        self.sidew.setObjectName('sidew')
+        self.sidew.setFixedWidth(236)
+        sv = QVBoxLayout(self.sidew)
+        sv.setContentsMargins(0, 16, 0, 8)
+        sv.setSpacing(6)
+        self.side_title = label('Capture', bold=True, size=17, wrap=False)
+        self.side_title.setContentsMargins(22, 0, 0, 2)
+        sv.addWidget(self.side_title)
         self.side = QListWidget()
-        self.side.setFixedWidth(232)
-        self.side.setIconSize(QSize(20, 20))
+        self.side.setIconSize(QSize(18, 18))
         self.side.setFrameShape(QFrame.Shape.NoFrame)
-        self.side.setSpacing(1)
+        self.side.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.side_items = {}
         for k, t in SIDE:
             if k is None:
-                it = QListWidgetItem('Capture')
-                f = it.font()
-                f.setPointSizeF(15)
-                f.setBold(True)
+                continue
+            if t is None:
+                it = QListWidgetItem(k.upper())
+                f = semibold(it.font())
+                f.setPointSizeF(7.5)
+                f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
                 it.setFont(f)
                 it.setFlags(Qt.ItemFlag.NoItemFlags)
-                it.setSizeHint(QSize(200, 40))
-            elif t is None:
-                it = QListWidgetItem(k)
-                f = it.font()
-                f.setPointSizeF(8.5)
-                f.setBold(True)
-                it.setFont(f)
-                it.setForeground(QColor(c['mu']))
-                it.setFlags(Qt.ItemFlag.NoItemFlags)
-                it.setSizeHint(QSize(200, 30))
+                it.setSizeHint(QSize(200, 34))
+                it.setTextAlignment(Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft)
             else:
                 it = QListWidgetItem(side_icon(k), t)
                 it.setData(Qt.ItemDataRole.UserRole, k)
-                it.setSizeHint(QSize(200, 30))
+                it.setSizeHint(QSize(200, 32))
                 self.side_items[k] = it
             self.side.addItem(it)
         self.side.currentItemChanged.connect(self._side_changed)
-        h.addWidget(self.side)
+        sv.addWidget(self.side, 1)
+        h.addWidget(self.sidew)
         col = QWidget()
         h.addWidget(col, 1)
         v = QVBoxLayout(col)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        # top bar: Back on the left, the Capture | Discover switch in the middle
+        # top bar: Back on the left, the Capture | Discover switch in the middle, search and PuTTY on the right
         top = QWidget()
-        tb = QHBoxLayout(top)
-        tb.setContentsMargins(6, 6, 6, 4)
-        self.back = QToolButton(text='‹')
-        self.back.setToolTip('Back to where you were (Alt+←)')
+        tg = QGridLayout(top)
+        tg.setContentsMargins(12, 8, 12, 6)
+        tg.setHorizontalSpacing(8)
+        self.back = U.tool(QToolButton(), 'back', tip='Back to where you were (Alt+←)', px=18)
         self.back.setEnabled(False)
-        self.back.setFixedWidth(34)
         self.back.clicked.connect(self.nav_back)
-        f = self.back.font()
-        f.setPointSize(14)
-        self.back.setFont(f)
-        tb.addWidget(self.back)
-        tb.addStretch(1)
-        seg = QFrame()
-        seg.setObjectName('seg')
-        sl = QHBoxLayout(seg)
-        sl.setContentsMargins(2, 2, 2, 2)
-        sl.setSpacing(0)
-        self.mode_c = QToolButton(text='Capture', checkable=True)
-        self.mode_d = QToolButton(text='Discover', checkable=True)
+        tg.addWidget(self.back, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.mode_c = QToolButton(text='Capture')
+        self.mode_d = QToolButton(text='Discover')
+        self.seg = U.Segmented([self.mode_c, self.mode_d], 112)
         self.mode_c.setChecked(True)
-        mg = QButtonGroup(self)
-        mg.setExclusive(True)
-        for b, colr in ((self.mode_c, '#0071e3'), (self.mode_d, '#0b8f83')):
-            mg.addButton(b)
-            b.setMinimumWidth(120)
-            b.setStyleSheet(f'QToolButton{{border:0;border-radius:6px;padding:4px 22px;font-weight:600;color:palette(window-text)}}'
-                            f'QToolButton:checked{{background:{colr};color:white}}')
-            sl.addWidget(b)
-        self.mode_putty = QToolButton(text='PuTTY ↗')   # opens PuTTY in its own window; not a mode
-        self.mode_putty.setMinimumWidth(110)
-        self.mode_putty.setStyleSheet('QToolButton{border:0;border-radius:6px;padding:4px 18px;font-weight:600;color:palette(window-text)}'
-                                      'QToolButton:hover{background:rgba(120,120,128,0.25)}'
-                                      'QToolButton:pressed{background:#6e56cf;color:white}')
-        self.mode_putty.setToolTip('Open PuTTY for SSH, Telnet or a serial console (opens in its own window)')
-        self.mode_putty.clicked.connect(self.open_putty)
-        sl.addWidget(self.mode_putty)
-        seg.setStyleSheet('QFrame#seg{background:rgba(120,120,128,0.18);border-radius:8px}')
         self.mode_c.setToolTip('Captures and their analysis')
         self.mode_d.setToolTip('Find devices on the network and read their points (Ctrl+5)')
         self.mode_c.clicked.connect(lambda: self.goto(self.last_capture_view))
         self.mode_d.clicked.connect(lambda: self.goto('x'))
-        tb.addWidget(seg)
-        tb.addStretch(1)
-        tb.addSpacing(34)                      # balances the Back button so the switch is centred
+        tg.addWidget(self.seg, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        rw = QWidget()
+        rl = QHBoxLayout(rw)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(6)
+        self.find_b = QPushButton('Search   Ctrl+K')
+        self.find_b.setToolTip('Jump to any view, device, point, capture tab or command (Ctrl+K)')
+        self.find_b.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.find_b.setMinimumWidth(170)
+        self.find_b.clicked.connect(self.command_palette)
+        rl.addWidget(self.find_b)
+        self.mode_putty = U.tool(QToolButton(), 'terminal', 'PuTTY',
+                                 'Open PuTTY for SSH, Telnet or a serial console (opens in its own window)', 18)
+        self.mode_putty.clicked.connect(self.open_putty)
+        rl.addWidget(self.mode_putty)
+        tg.addWidget(rw, 0, 2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tg.setColumnStretch(0, 1)
+        tg.setColumnStretch(2, 1)
         v.addWidget(top)
+        self.prog = U.TopProgress()              # thin progress line: decoding, scanning, sorting
+        v.addWidget(self.prog)
         # write-access and update banners
         self.wb = QFrame()
         self.wb.setStyleSheet('QFrame{background:#c42b1c} QLabel{color:white} QPushButton{padding:2px 10px}')
         wl = QHBoxLayout(self.wb)
-        wl.setContentsMargins(14, 6, 14, 6)
+        wl.setContentsMargins(16, 8, 16, 8)
         self.wb_l = QLabel()
         wl.addWidget(self.wb_l, 1)
         b = QPushButton('Turn off')
@@ -992,16 +960,16 @@ class MainWindow(QMainWindow):
         self.wb.hide()
         v.addWidget(self.wb)
         self.ub = QFrame()
-        self.ub.setStyleSheet('QFrame{background:#005fb8} QLabel{color:white} QPushButton{padding:2px 10px}')
-        ul = QHBoxLayout(self.ub)
-        ul.setContentsMargins(14, 6, 14, 6)
+        self.ub.setObjectName('ub')
+        wl2 = QHBoxLayout(self.ub)
+        wl2.setContentsMargins(16, 8, 16, 8)
         self.ub_l = QLabel()
-        ul.addWidget(self.ub_l, 1)
+        wl2.addWidget(self.ub_l, 1)
         for t, fn in (('What’s new', lambda: self.upd_dlg()), ('Update now', lambda: self.upd_install()),
                       ('Later', self.upd_later)):
             bb = QPushButton(t)
             bb.clicked.connect(fn)
-            ul.addWidget(bb)
+            wl2.addWidget(bb)
             if t == 'Update now':
                 self.ub_go = bb
         self.ub.hide()
@@ -1009,7 +977,7 @@ class MainWindow(QMainWindow):
         # capture tabs
         self.tabrow = QWidget()
         tl = QHBoxLayout(self.tabrow)
-        tl.setContentsMargins(6, 0, 6, 0)
+        tl.setContentsMargins(8, 0, 8, 0)
         tl.setSpacing(4)
         self.tabbar = QTabBar()
         self.tabbar.setTabsClosable(True)
@@ -1021,16 +989,15 @@ class MainWindow(QMainWindow):
         self.tabbar.tabCloseRequested.connect(lambda i: self.close_tab(self._tab_at(i)))
         self.tabbar.tabMoved.connect(self._tab_moved)
         tl.addWidget(self.tabbar, 1)
-        nb = QToolButton(text='+')
-        nb.setToolTip('Open capture in a new tab (Ctrl+O)')
-        nb.clicked.connect(self.open_files)
-        tl.addWidget(nb)
+        self.nb = U.tool(QToolButton(), 'plus', tip='Open capture in a new tab (Ctrl+O)')
+        self.nb.clicked.connect(self.open_files)
+        tl.addWidget(self.nb)
         v.addWidget(self.tabrow)
         # header: open + display filter + status
         self.header = QWidget()
         hl = QHBoxLayout(self.header)
-        hl.setContentsMargins(12, 8, 12, 8)
-        hl.setSpacing(10)
+        hl.setContentsMargins(16, 8, 16, 8)
+        hl.setSpacing(12)
         ob = QPushButton('Open capture')
         ob.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         ob.clicked.connect(self.open_files)
@@ -1056,20 +1023,51 @@ class MainWindow(QMainWindow):
         v.addWidget(self.stack, 1)
         self.pk = PacketsPane(self)
         self.stack.addWidget(self.pk)
-        self.statusBar().setSizeGripEnabled(True)
+        self.empty_view = U.EmptyState()       # analysis views before a capture is open
+        self.stack.addWidget(self.empty_view)
+        self.toaster = U.Toast(root)
         self.write_timer = QTimer(self, interval=1000, timeout=self.wb_draw)
         self.write_timer.start()
         self.poll_timer = QTimer(self, interval=700, timeout=self.poll)
         self.online_timer = QTimer(self, interval=2000, timeout=self._online_tick)
         self.online_timer.start()
+        self.busy_timer = QTimer(self, interval=120, timeout=self._busy_tick)
+        self.busy_timer.start()
         sc = [('Ctrl+1', 'p'), ('Ctrl+2', 'f'), ('Ctrl+3', 'd'), ('Ctrl+4', 'o'), ('Ctrl+5', 'x'), ('Ctrl+6', 'w'),
               ('Ctrl+7', 't'), ('Ctrl+8', 'm'), ('Ctrl+9', 'g')]
         for k, vk in sc:
             QShortcut(QKeySequence(k), self, activated=lambda vk=vk: self.goto(vk))
         QShortcut(QKeySequence('Alt+Left'), self, activated=self.nav_back)
+        QShortcut(QKeySequence('Ctrl+K'), self, activated=self.command_palette)
         esc_ = QShortcut(QKeySequence('Escape'), self.qbox, activated=lambda: self.set_filter(''))
         esc_.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self.style_chrome()
         self.side.setCurrentItem(self.side_items['p'])
+
+    def style_chrome(self):
+        """Colours of the sidebar, search field and banners (again after a theme change)."""
+        c = colors()
+        ac = QColor(c['ac'])
+        sel = f"rgba({ac.red()},{ac.green()},{ac.blue()},{0.24 if is_dark() else 0.13})"
+        self.sidew.setStyleSheet(
+            f"QFrame#sidew{{background:{c['side']};border-right:1px solid {c['hair']}}}"
+            'QListWidget{background:transparent;border:0;outline:0}'
+            f"QListWidget::item{{border-radius:7px;padding:0px 6px;margin:0px 10px;color:{c['fg']}}}"
+            'QListWidget::item:hover:!selected:enabled{background:rgba(118,118,128,0.14)}'
+            f"QListWidget::item:selected{{background:{sel};color:{c['fg']}}}"
+            f"QListWidget::item:disabled{{color:{c['mu']};background:transparent;padding-left:8px}}")
+        for k, it in self.side_items.items():
+            it.setIcon(side_icon(k))
+        self.find_b.setIcon(U.icon('search', c['mu'], 16))
+        self.find_b.setStyleSheet(f"QPushButton{{text-align:left;padding:5px 12px;border-radius:8px;border:0;"
+                                  f"background:rgba(118,118,128,{0.24 if is_dark() else 0.12});color:{c['mu']}}}"
+                                  f"QPushButton:hover{{background:rgba(118,118,128,{0.32 if is_dark() else 0.18})}}")
+        self.ub.setStyleSheet(f"QFrame#ub{{background:{c['ac']}}} QFrame#ub QLabel{{color:white}} QPushButton{{padding:2px 10px}}")
+        for b, n in ((self.back, 'back'), (self.nb, 'plus'), (self.pk.sqp, 'up'), (self.pk.sqd, 'down'), (self.live.rf, 'refresh')):
+            b.setIcon(U.icon(n, c['fg'], 16))
+        self.mode_putty.setIcon(U.icon('terminal', c['ac'], 18))
+        self.empty_view.retheme()
+        self.pk.empty.retheme()
 
     @staticmethod
     def _dot(col):
@@ -1172,9 +1170,12 @@ class MainWindow(QMainWindow):
         act(m, 'Everyday BMS tools', lambda: self.help('bms'))
         act(m, 'Keyboard shortcuts', lambda: self.help('keys'))
         m.addSeparator()
+        act(m, 'Search everything…', self.command_palette)
+        m.addSeparator()
+        act(m, 'What’s new', self.whats_new)
         act(m, 'Check for updates…', lambda: self.upd_check(True))
         m.addSeparator()
-        act(m, 'About BACnet Inspector', lambda: self.help('about'))
+        act(m, 'About BACnet Inspector', self.about)
 
     # ---------------------------------------------------------------- views --
     def view(self, k):
@@ -1210,23 +1211,47 @@ class MainWindow(QMainWindow):
         else:
             self.side.setCurrentItem(it)
 
+    NEEDS_CAPTURE = set('fdwtsoganmb')         # views that show a capture's analysis
+
+    def _place(self, k, fade):
+        """Show view k, or a friendly empty page when it needs a capture and none is loaded."""
+        w = self.view(k)
+        if k in self.NEEDS_CAPTURE and not self.P:
+            t = self.ac
+            e = self.empty_view
+            if t and t.busy:
+                e.set('file', f'Opening {t.n}', t.busy[:1].upper() + t.busy[1:], [], busy=True)
+            elif t and t.live:
+                e.set('wave', 'Nothing captured yet', f'{VTITLE.get(k, "This view")} fills in as packets arrive. '
+                      'Start the live capture, or open a saved capture.',
+                      [('Start capture', lambda: (self.goto('p'), self.start_stop())), ('Open capture…', self.open_files)])
+            else:
+                e.set('file', 'No capture open', f'Open a capture to see {VTITLE.get(k, "this view").lower()}.',
+                      [('Open capture…', self.open_files)])
+            w = e
+        if self.stack.currentWidget() is not w:
+            self.stack.setCurrentWidget(w)
+            if fade:
+                U.fade_in(w)
+        return w
+
     def show_view(self, k):
         if k != self.cur_view:
             self.nav_note(k)
         self.cur_view = k
         if k != 'x':
             self.last_capture_view = k
-        w = self.view(k)
-        self.stack.setCurrentWidget(w)
+        self.store.set('bi_view', k)
+        w = self._place(k, True)
         disc = k == 'x'
         (self.mode_d if disc else self.mode_c).setChecked(True)
-        self.side.setVisible(not disc)
+        self.sidew.setVisible(not disc)
         self.tabrow.setVisible(not disc)
         self.header.setVisible(not disc)
         self.qbox.setVisible(k == 'p')
         self.st.setVisible(k == 'p')
         self.live.setVisible(not disc and bool(self.ac and self.ac.live))
-        if k != 'p' and hasattr(w, 'refresh'):
+        if k != 'p' and w is not self.empty_view and hasattr(w, 'refresh'):
             w.refresh()
         self.update_back()
 
@@ -1238,8 +1263,10 @@ class MainWindow(QMainWindow):
         self.side_items['d'].setText('Devices' + (f'   ({nd})' if nd else ''))
         for k, v in self.views.items():
             v._stale = True
+        if self.cur_view not in ('p', 'x'):
+            self._place(self.cur_view, True)
         w = self.stack.currentWidget()
-        if w is not self.pk and hasattr(w, 'refresh'):
+        if w is not self.pk and w is not self.empty_view and hasattr(w, 'refresh'):
             w.refresh()
         self.update_tabs()
 
@@ -1296,8 +1323,10 @@ class MainWindow(QMainWindow):
             if i >= self.tabbar.count():
                 self.tabbar.addTab('')
             ns = sum(1 for f in t.FD if f['s'] == 'SERIOUS')
-            txt = ('● ' if t.live and self.run else '') + t.n + (f'  ⚠{ns}' if ns else '')
+            txt = t.n + (f'  ⚠ {ns}' if ns else '')
             self.tabbar.setTabText(i, txt)
+            self.tabbar.setTabIcon(i, U.dot(colors()['no']) if t.live and self.run else
+                                   U.icon('wave' if t.live else 'file', colors()['mu'], 14))
             self.tabbar.setTabData(i, t.id)
             self.tabbar.setTabToolTip(i, t.path or t.n)
             self.tabbar.setTabTextColor(i, QColor(colors()['se']) if ns else self.tabbar.palette().color(QPalette.ColorRole.WindowText))
@@ -1332,8 +1361,11 @@ class MainWindow(QMainWindow):
             self.pk.show_packet(self.pk.sel)
         self.pk.show_list(bool(self.P))
         if not self.P:
-            self.pk.set_empty('Live capture ready: choose an interface and press Start.\nSaved captures open in their own tabs (use Open capture or the + button).'
-                              if t.live else f'Decoding {t.n}… {t.busy}')
+            if t.live:
+                self.pk.set_empty('Live capture ready', 'Choose an adapter above and press Start. Saved captures open in their own '
+                                  'tabs.', 'wave', [('Start capture', self.start_stop), ('Open capture…', self.open_files)])
+            else:
+                self.pk.set_empty(f'Opening {t.n}', t.busy[:1].upper() + t.busy[1:], 'file', [], busy=True)
         QTimer.singleShot(0, lambda s=t.scroll: self.pk.tv.verticalScrollBar().setValue(s))
         self.live.setVisible(t.live and self.cur_view != 'x')
         self.setWindowTitle(f'{t.n} – {APP_NAME}')
@@ -1345,6 +1377,8 @@ class MainWindow(QMainWindow):
             return
         i = self.TB.index(t)
         self.TB.remove(t)
+        if t.path:
+            self.toast(f'Closed {t.n}', lambda p=t.path, q=(self.qbox.text() if t is self.ac else t.q): self.open_path(p, q))
         if t is self.ac:
             self.ac = None
             nt = self.TB[min(i, len(self.TB) - 1)] if self.TB else None
@@ -1354,6 +1388,8 @@ class MainWindow(QMainWindow):
                 self.P, self.FD, self.T0 = [], C.Analysis(), 0.0
                 self.pk.relist()
                 self.pk.show_list(False)
+                self.pk.set_empty('Open a capture', 'Drop a .pcap or .pcapng file here, or open one.', 'file',
+                                  [('Open capture…', self.open_files)])
                 self.st.setText('No file loaded')
                 self.setWindowTitle(APP_NAME)
                 self.refresh_views()
@@ -1400,7 +1436,9 @@ class MainWindow(QMainWindow):
         if t is self.ac:
             self.st.setText(f'{t.n}: {msg}')
             if not t.P:
-                self.pk.set_empty(f'Decoding {t.n}… {msg}')
+                self.pk.set_empty(f'Opening {t.n}', msg[:1].upper() + msg[1:], 'file', [], busy=True)
+            if self.stack.currentWidget() is self.empty_view:
+                self._place(self.cur_view, False)
 
     def _loaded(self, t):
         t.busy = ''
@@ -1571,6 +1609,17 @@ class MainWindow(QMainWindow):
             self.switch_tab(self.LT)
         self.update_tabs()
         self.restore_session()
+        last = self.store.get('bi_view')
+        if last and last != 'p' and (last == 'x' or last in self.side_items):
+            self.goto(last)                       # open where the user left off
+            self.nav.clear()
+            self.update_back()
+        U.style_titlebar(self)
+        seen = self.store.get('bi_seen_ver')
+        if seen != BL.APP_VERSION:
+            self.store.set('bi_seen_ver', BL.APP_VERSION)
+            if seen or self.store.get('bi_geom'):          # an existing user who has just updated
+                QTimer.singleShot(700, self.whats_new)
         if self.store.get('bi_updauto', '1') != '0' and time.time() - float(self.store.get('bi_updlast') or 0) > 86400:
             QTimer.singleShot(4000, lambda: self.upd_check(False))
 
@@ -2131,20 +2180,114 @@ class MainWindow(QMainWindow):
             os.startfile(p)
 
     # ------------------------------------------------------------------ misc --
-    def toast(self, m):
-        self.statusBar().showMessage(m, 6000)
+    def toast(self, m, action=None, action_text='Undo'):
+        """A short message at the bottom of the window (with an optional action such as Undo)."""
+        self.toaster.show_msg(m, action, action_text)
 
     def set_theme(self, v):
         self.store.set('bi_theme', v)
         apply_theme(v)
+        self.theme_soon()
+        self.toast('Theme: ' + (v or 'automatic – follows Windows'))
+
+    def theme_soon(self):
+        if not getattr(self, '_theme_pending', False):
+            self._theme_pending = True
+            QTimer.singleShot(0, self.theme_changed)
+
+    def theme_changed(self):
+        """Light / dark changed (from the View menu or from Windows): repaint everything in the new colours."""
+        self._theme_pending = False
         app = QApplication.instance()
         app.setStyle(app.style().name())          # re-create the style so checkboxes etc. repaint in the new colours
+        U.apply_palette(app)
+        self.style_chrome()
+        U.style_titlebar(self)
         self.pk.model.retheme()
         self.pk.model.layoutChanged.emit()
         for w in self.views.values():
             w._stale = True
         self.refresh_views()
-        self.toast('Theme: ' + (v or 'automatic'))
+        self.update_tabs()
+        if 'x' in self.views:
+            self.views['x'].retheme()
+
+    def _busy_tick(self):
+        """Drive the thin progress line under the toolbar."""
+        t = self.ac
+        on, pct = False, None
+        if t and t.busy:
+            on = True
+            import re
+            m = re.search(r'(\d+)%', t.busy)
+            pct = int(m.group(1)) if m else None
+        elif any(ld.isRunning() for ld in self.loaders) or getattr(self.pk, '_waiting', False) or self.explorer.busy:
+            on = True
+        self.prog.set_state(on, pct)
+
+    # -------------------------------------------------------- command palette --
+    def command_palette(self):
+        """Ctrl+K: jump to anything by typing."""
+        import bi_explore as E
+        items = []
+        keys = {'p': 'Ctrl+1', 'f': 'Ctrl+2', 'd': 'Ctrl+3', 'o': 'Ctrl+4', 'x': 'Ctrl+5', 'w': 'Ctrl+6', 't': 'Ctrl+7',
+                'm': 'Ctrl+8', 'g': 'Ctrl+9'}
+        for k, t in VTITLE.items():
+            items.append((k, t, keys.get(k, ''), lambda k=k: self.goto(k), 'View'))
+        for t in self.TB:
+            items.append(('wave' if t.live else 'tab', t.n, 'capture tab',
+                          lambda t=t: (self.switch_tab(t), self.goto(self.last_capture_view)), 'Tab'))
+        for m in self.menuBar().actions():
+            menu = m.menu()
+            if menu is None:
+                continue
+            mt = m.text().replace('&', '')
+            for a in menu.actions():
+                if a.isSeparator() or a.menu() is not None or not a.text():
+                    continue
+                en = getattr(a, '_en', None)
+                if en is not None and not en():
+                    continue
+                sc = a.shortcut().toString()
+                items.append(('cmd', a.text().replace('&', '').rstrip('…'), mt + (f' · {sc}' if sc else ''), a.trigger, 'Command'))
+        dv = self.view('x')
+        for d in dv.sd_devs():
+            items.append(('d', 'Device ' + dv.dev_label(d), d['ip'] or dv.grp_name(dv.grp(d)),
+                          lambda key=d['key']: dv.open_device(key), 'Device'))
+        for e in list(self.explorer.devs.values()):
+            for o in e.get('objs') or []:
+                nm = o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"
+                items.append(('point', nm, f"{E.sd_ty(o['ty'])} {o['inst']} · device {e['id']}",
+                              lambda k=e['key'], o=o['o']: self.open_point(k, o), 'Point'))
+        for f in self.FD:
+            items.append(('f', f['t'], f['s'].lower(), lambda: self.goto('f'), 'Finding'))
+        U.CommandPalette(self, items).exec()
+
+    def open_point(self, k, o):
+        dv = self.view('x')
+        dv.live = True
+        self.goto('x')
+        dv.go_node({'k': k, 'o': o})
+
+    # ---------------------------------------------------------- about / news --
+    def whats_new(self):
+        notes = ''
+        p = res_path('release_notes.txt')
+        if os.path.isfile(p):
+            with open(p, encoding='utf-8', errors='replace') as f:
+                notes = f.read()
+        U.whats_new_dialog(self, BL.APP_VERSION, notes)
+
+    def about(self):
+        page = None
+        try:
+            with open(res_path('update_url.txt'), encoding='utf-8') as f:
+                u = f.read().strip()
+            if '/releases/' in u:
+                page = u.split('/releases/')[0] + '/releases'
+        except OSError:
+            pass
+        U.about_dialog(self, BL.APP_VERSION, lambda: self.upd_check(True), self.whats_new, res_path('bacnet_inspector.ico'), page)
 
     def reset_panes(self):
         self.pk._auto_cols = True
@@ -2304,7 +2447,13 @@ def main():
         return 0
     store = Store()
     apply_theme(store.get('bi_theme') or '')
+    U.apply_fonts(app)
+    U.apply_palette(app)
     w = MainWindow(store)
+    try:
+        QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: w.theme_soon())
+    except AttributeError:
+        pass
     w.open_first = path
     srv = QLocalServer()
     QLocalServer.removeServer(SERVER)
