@@ -660,21 +660,35 @@ class Explorer:
 
     def _scan_ip(self, ap, dest, bbmd):
         """Who-Is over BACnet/IP: broadcast (or to one address), optionally through a BBMD."""
+        def addr(a):                                       # '10.0.0.5' or '10.0.0.5:47809'
+            return a if ':' in a else a + ':47808'
+        self.bbmd_note = ''
         if bbmd:
             self.bbmd_rc = None
-            self.send(bbmd + ':47808', bytes([0x81, 0x05, 0, 6, 1, 0x2C]))
-            time.sleep(0.7)
-            if self.bbmd_rc:
-                self.msg = f'The BBMD at {bbmd} refused the registration (code 0x{self.bbmd_rc:x}). Scanning this subnet only.'
+            self.msg = f'Registering with the BBMD at {bbmd}…'
+            self.notify()
+            self.send(addr(bbmd), bytes([0x81, 0x05, 0, 6, 1, 0x2C]))   # Register-Foreign-Device, 300 s
+            end = time.time() + 2.0
+            while self.bbmd_rc is None and time.time() < end and not self.stop:
+                time.sleep(0.1)
+            if self.bbmd_rc is None:
+                self.bbmd_note = f'No answer from the BBMD at {bbmd} – other subnets may be missing.'
+            elif self.bbmd_rc:
+                self.bbmd_note = (f'The BBMD at {bbmd} refused the registration (code 0x{self.bbmd_rc:x}) – '
+                                  'only this subnet was scanned. Check that the BBMD allows foreign devices.')
+            else:
+                self.bbmd_note = f'Scanned other subnets through the BBMD at {bbmd}.'
+            self.msg = 'Looking for devices…'
+            self.notify()
         for _ in range(2):
             if self.stop:
                 break
             if dest == 'broadcast':
                 self.send('broadcast', ex_wrap(None, ap, 0, True))
             else:
-                self.send(dest + ':47808', ex_wrap(None, ap, 0, False, 0x0B))
+                self.send(addr(dest), ex_wrap(None, ap, 0, False, 0x0B))
             if bbmd and not self.bbmd_rc:
-                self.send(bbmd + ':47808', ex_wrap(None, ap, 0, False, 0x09))
+                self.send(addr(bbmd), ex_wrap(None, ap, 0, False, 0x09))   # Distribute-Broadcast-To-Network
             time.sleep(2.2)
 
     def _scan_finish(self, on_done):
@@ -690,6 +704,8 @@ class Explorer:
         n = self.labels_from_names()
         nfound = len([d for d in list(self.devs.values()) if not d.get('old')])
         self.msg = 'Stopped.' if self.stop else f"Done – {nfound} device(s) found.{f' {n} name(s) added as labels.' if n else ''}"
+        if getattr(self, 'bbmd_note', '') and self.mode != 'mstp':
+            self.msg += ' ' + self.bbmd_note
         self.notify()
         if on_done:
             on_done(n)
@@ -719,6 +735,14 @@ class Explorer:
             return self.values_all(dev)
         self.stop = False
         self.busy = 'browse'
+        if not self.read_objlist(dev):
+            self.busy = ''
+            self.notify()
+            return
+        self.values_all(dev)
+
+    def read_objlist(self, dev, n_parallel=4):
+        """Read the device's object list into dev['objs'] (names and values not yet read). True if it worked."""
         dev['pm'] = 'Reading the object list…'
         self.notify()
         dob = oid(8, dev['id'])
@@ -734,9 +758,7 @@ class Explorer:
             n = x['it'][0]['raw'] if x and x['it'] else None
             if n is None:
                 dev['pm'] = 'Could not read the object list: ' + str(c.get('err') or r.get('err') or 'no answer')
-                self.busy = ''
-                self.notify()
-                return
+                return False
             lst = []
 
             def one(i):
@@ -746,16 +768,42 @@ class Explorer:
                 y = ex_dec_rp(q['d'], q['k'], q['L']) if q.get('d') else None
                 if y and y['it'] and y['it'][0]['n'] == 12:
                     lst.append(y['it'][0]['raw'])
-            self.pool_map(range(1, n + 1), 4, one)
+            self.pool_map(range(1, n + 1), n_parallel, one)
         if lst is None:
             dev['pm'] = 'Could not read the object list: ' + str(r.get('err') or 'no answer')
-            self.busy = ''
-            self.notify()
-            return
+            return False
         lst.sort(key=lambda o: (o_t(o), o_i(o)))
         dev['objs'] = [{'o': o, 'ty': o_t(o), 'inst': o_i(o), 'name': '', 'val': '', 'u': '', 'desc': ''} for o in lst]
         dev['stale'] = 0
-        self.values_all(dev)
+        dev['pm'] = ''
+        return True
+
+    def inventory(self, on_done=None):
+        """For a site inventory: read the details and the object list of every device that does not have them yet."""
+        self.stop = False
+        self.busy = 'inventory'
+        mstp = self.mode == 'mstp'
+        devs = [d for d in list(self.devs.values()) if is_mstp(d) == mstp]
+        done = [0]
+
+        def one(d):
+            if not d.get('vendor') and not str(d.get('st') or '').startswith('ok'):
+                self.info(d)
+            if not d.get('objs'):
+                d['inv_err'] = '' if self.read_objlist(d, 2) else d.get('pm') or 'no answer'
+            done[0] += 1
+            self.msg = f'Building the site inventory… {done[0]} of {len(devs)} devices'
+            self.notify()
+        self.msg = f'Building the site inventory… 0 of {len(devs)} devices'
+        self.notify()
+        self.pool_map(devs, 1 if mstp else 3, one)
+        self.busy = ''
+        self.cache()
+        pts = sum(len(d.get('objs') or []) for d in devs)
+        self.msg = 'Stopped.' if self.stop else f'Site inventory ready – {len(devs)} device(s), {pts:,} object(s).'
+        self.notify()
+        if on_done:
+            on_done(not self.stop)
 
     def _fill(self, row, pr):
         def g(p):

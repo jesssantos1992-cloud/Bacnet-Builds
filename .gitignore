@@ -5,3 +5,7 @@ installer/
 *.spec
 __pycache__/
 *.pyc
+
+# test output and private site captures
+tests/out/
+tests/captures/

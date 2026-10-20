@@ -8,12 +8,28 @@ One-time setup
 2. Put its address in update_url.txt, like this (one line):
      https://github.com/NAME/REPO/releases/latest/download/update.json
    Do not change this after you have sent the app out: every installed copy looks there.
+3. (Optional, lets release.bat publish for you) Make a GitHub token:
+   github.com -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens
+   -> Generate new token. Repository access: only this repository. Permissions: Contents = Read and write.
+   Then store it for your Windows user (run once in a Command Prompt, then open a new one):
+     setx GITHUB_TOKEN "github_pat_..."
+   Keep the token private - anyone who has it can publish releases.
 
-Every release
--------------
-1. Raise the number in version.txt (for example 1.2.1 -> 1.2.2). Installed copies only
+Every release - the quick way
+-----------------------------
+1. Raise the number in version.txt (for example 1.3.0 -> 1.3.1). Installed copies only
    update when this number is higher than theirs.
 2. Write what changed in release_notes.txt. Users see it in the update window.
+3. Commit and push.
+4. Double-click release.bat. It runs the tests, builds the app, builds the installer and
+   update.json, and - when GITHUB_TOKEN is set - creates the GitHub release v<version> with both
+   files attached. Without a token it stops after building and opens the "new release" page
+   for you (then do step 4 below by hand).
+   release.bat -SkipTests skips the tests; release.bat -NoPublish only builds.
+
+Every release - by hand
+-----------------------
+1-2. As above.
 3. Run build_windows.bat, then build_installer.bat.
    You get installer\BACnet-Inspector-Setup-<version>.exe and installer\update.json.
 4. On GitHub: your repository -> Releases -> "Draft a new release".
@@ -21,6 +37,12 @@ Every release
    - Attach BOTH files: the Setup .exe and update.json.
    - Leave "Set as the latest release" ticked, then Publish.
 5. Done. Installed copies see the update the next time they start (or Help -> Check for updates).
+
+Tests
+-----
+run_tests.bat runs every regression test (tests\run_tests.py). Tests that open captures read the
+.pcap / .pcapng files in tests\captures - put one BACnet/IP and one MS/TP capture there. That folder
+is not stored in git (captures come from customer sites), so copy them in again on a new PC.
 
 New employees can download the Setup .exe from the release page:
   https://github.com/NAME/REPO/releases/latest

@@ -136,6 +136,7 @@ RIS = ['cold start (full restart)', 'warm start (restart)', 'start backup', 'end
 PN = {12: 'sw', 28: 'desc', 44: 'fw', 58: 'loc', 70: 'model', 77: 'name', 121: 'vendor', 372: 'serial'}
 
 from bi_vendors import VN  # noqa: E402  (BACnet vendor ID -> manufacturer)
+__all__ = ['VN']          # re-exported: other modules use C.VN (keeps the import from looking unused)
 
 # ------------------------------------------------------- JS-compatible text --
 _NUMRE = re.compile(r'^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$')

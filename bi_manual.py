@@ -458,7 +458,9 @@ using the addresses seen in the capture.</p>
 <code>10.0.255.255</code>).</li>
 <li><b>Only device IDs</b> – limit the scan to a range of IDs on a big site.</li>
 <li><b>Also scan other subnets through a BBMD</b> – registers this PC as a foreign device for 5 minutes so the scan
-reaches other IP subnets.</li>
+reaches other IP subnets. Add <code>:port</code> if the BBMD does not use 47808. When the scan finishes, the
+status line says whether the BBMD accepted the registration; if it refused or did not answer, only this subnet was
+scanned – check that the BBMD's foreign-device table is enabled and that UDP 47808 is not blocked.</li>
 <li><b>Use discovered device names as labels in captures</b> and <b>Discover automatically when a live capture
 starts</b>.</li>
 </ul>
@@ -469,6 +471,20 @@ tree. Right-click a device for more: refresh its details, show its packets, name
 or forget it.</p>
 <p><b>Export device list</b> saves every discovered device as Excel or CSV. <b>Use names as labels</b> copies the device
 names into the capture pages.</p>
+<h3>Site inventory</h3>
+<p>After a scan, press <b>Site inventory…</b> (or Capture &gt; <b>Build site inventory…</b>). The app reads the details
+and the object list of every device it found – the status line shows how far it has got – and then offers to save an
+Excel workbook (or CSV) with one row per device:</p>
+<ul>
+<li>device ID, name, vendor, model, firmware and software version;</li>
+<li>address: IP (with network and station for devices behind a router) or MS/TP MAC;</li>
+<li>location, description, Max APDU and segmentation;</li>
+<li>how many objects the device has, and how many of each kind: AI, AO, AV, BI, BO, BV, multi-state, trend logs,
+schedules, calendars, notification classes and files;</li>
+<li>a note for any device that did not answer.</li>
+</ul>
+<p>It is the usual hand-over document at the end of a job. Only the object lists are read, not every value, so it is
+quick even on a big site. It covers the devices on the side you are on: BACnet/IP, or the MS/TP trunk you joined.</p>
 """)
 
 ch('dmstp', 'Discover over MS/TP', 'Discover', f"""
@@ -699,6 +715,11 @@ invited in. If it never joins, lower the PC's MAC (masters only poll up to their
 <h3>Where are my settings?</h3>
 <p>Names, notes, saved filters and settings are stored in <i>%LOCALAPPDATA%\\BACnetInspector</i>. They are kept when
 the app is updated.</p>
+<h3>“Something went wrong”</h3>
+<p>If the app hits an unexpected error it keeps running, shows a short message and writes the details to the problem
+log. Help &gt; <b>Report a problem…</b> shows the log: press <b>Copy details</b> and send them with a note of what you
+were doing, or <b>Open log folder</b> (<i>%LOCALAPPDATA%\\BACnetInspector\\logs</i>) to attach the file. The log contains
+error details and the app and Windows versions – not your captures or device data.</p>
 """)
 
 ch('glossary', 'BACnet words explained', 'Reference', """

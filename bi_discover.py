@@ -63,9 +63,11 @@ class DiscoverView(QWidget):
         self.b_new = QPushButton('New discover')
         self.b_scan = QPushButton('Scan network')
         self.b_opts = QPushButton('Options…')
+        self.b_inv = QPushButton('Site inventory…')
+        self.b_inv.setToolTip('Read the details and object list of every device, then save an Excel inventory with point counts')
         self.b_arm = QPushButton('Enable write access…')
         self.b_arm.setToolTip('Allow Write Property for a limited time')
-        for b in (self.b_new, self.b_scan, self.b_opts, self.b_arm):
+        for b in (self.b_new, self.b_scan, self.b_opts, self.b_inv, self.b_arm):
             bl.addWidget(b)
         v.addWidget(bar)
         v.addWidget(self._conn_bar())
@@ -172,6 +174,7 @@ class DiscoverView(QWidget):
         self.b_new.clicked.connect(self.new_discover)
         self.b_scan.clicked.connect(lambda: self.scan())
         self.b_opts.clicked.connect(self.options)
+        self.b_inv.clicked.connect(self.inventory)
         self.b_arm.clicked.connect(lambda: win.disarm() if self.ex.armed() else win.arm_dlg())
         self.q.textChanged.connect(self._search)
         self.tree.currentItemChanged.connect(self._tree_pick)
@@ -528,7 +531,11 @@ class DiscoverView(QWidget):
             self.ms_update()
         show_left = bool(self.pk) or (self.live and bool(D))
         self.left.setVisible(show_left)
-        if self.ex.busy == 'scan':
+        was, self._was_busy = getattr(self, '_was_busy', ''), self.ex.busy
+        if was in ('scan', 'inventory') and not self.ex.busy and self.ex.msg and (
+                getattr(self.ex, 'bbmd_note', '') or not self.ex.msg.startswith(('Done', 'Site inventory ready'))):
+            self.win.toast(self.ex.msg)              # BBMD result, errors – they would vanish with the status line
+        if self.ex.busy in ('scan', 'inventory'):
             self.status.setText(self.ex.msg)
         else:
             self.status.setText(self.status_text(D))
@@ -1501,7 +1508,7 @@ class DiscoverView(QWidget):
         rr.addWidget(QLabel('–'))
         rr.addWidget(hi)
         bb_ = QLineEdit(o.get('bbmd', ''))
-        bb_.setPlaceholderText('BBMD address, e.g. 10.20.0.5')
+        bb_.setPlaceholderText('BBMD address, e.g. 10.20.0.5 (or 10.20.0.5:47809)')
         f.addRow('Send to', to)
         f.addRow('Only device IDs', rr)
         f.addRow('Also scan other subnets through a BBMD\n(registers this PC as a foreign device for 5 minutes)', bb_)
@@ -1529,6 +1536,60 @@ class DiscoverView(QWidget):
                  d.get('vendor') or C.VN.get(d.get('vn'), ''), d.get('vn'), d.get('model') or '', d.get('fw') or '', d.get('sw') or '',
                  d.get('desc') or '', d.get('loc') or '', d.get('mx')] for d in sorted(self.ex.devs.values(), key=lambda d: d['id'])]
         return csv_text('Device ID,Name,Address,Network,Vendor,Vendor ID,Model,Firmware,Software version,Description,Location,Max APDU', rows)
+
+    # object type -> inventory column (anything else is counted under Other)
+    INV_TYPES = [(0, 'AI'), (1, 'AO'), (2, 'AV'), (3, 'BI'), (4, 'BO'), (5, 'BV'), (13, 'MSI'), (14, 'MSO'), (19, 'MSV'),
+                 (20, 'Trend logs'), (17, 'Schedules'), (6, 'Calendars'), (15, 'Notification classes'), (10, 'Files')]
+
+    def csv_inventory(self):
+        """Site inventory: one row per discovered device with its details and how many of each kind of point it has."""
+        ms = self.ex.mode == 'mstp'
+        devs = sorted((d for d in self.ex.devs.values() if E.is_mstp(d) == ms), key=lambda d: d['id'])
+        known = {t for t, _ in self.INV_TYPES} | {8}
+        seg = {0: 'both', 1: 'transmit', 2: 'receive', 3: 'no'}
+        rows = []
+        for d in devs:
+            objs = d.get('objs')
+            if objs is None:
+                counts = [''] * (len(self.INV_TYPES) + 2)
+            else:
+                n = {}
+                for o in objs:
+                    n[o['ty']] = n.get(o['ty'], 0) + 1
+                counts = [len(objs)] + [n.get(t, 0) for t, _ in self.INV_TYPES] + [sum(v for t, v in n.items() if t not in known)]
+            if E.is_mstp(d):
+                where, net, station = 'MS/TP', '', f"MAC {d.get('mac')}"
+            elif d.get('sn') is not None:
+                where, net, station = f"{d['ip']} (router)", d['sn'], d.get('sa') or ''
+            else:
+                where, net, station = d['ip'] + ('' if d.get('port') in (None, 47808) else f":{d['port']}"), '', ''
+            note = d.get('inv_err') or ('' if str(d.get('st') or '').startswith('ok') or d.get('st') == 'from capture'
+                                        else d.get('st') or '')
+            rows.append([d['id'], d.get('name') or '',d.get('vendor') or C.VN.get(d.get('vn'), ''),
+                         d.get('vn'), d.get('model') or '', d.get('fw') or '', d.get('sw') or '', where, net, station,
+                         d.get('loc') or '', d.get('desc') or '', d.get('mx'), seg.get(d.get('sg'), ''), *counts, note])
+        head = ['Device ID', 'Name', 'Vendor', 'Vendor ID', 'Model', 'Firmware', 'Software version', 'Address', 'Network',
+                'Station / MAC', 'Location', 'Description', 'Max APDU', 'Segmentation', 'Objects'] + \
+               [n for _, n in self.INV_TYPES] + ['Other', 'Note']
+        return csv_text(','.join(head), rows)
+
+    def inventory(self):
+        """Read details and object lists for every device, then save the site inventory."""
+        ex = self.ex
+        if ex.busy:
+            return self.win.toast('Wait for the current scan or read to finish first')
+        ms = ex.mode == 'mstp'
+        if not any(E.is_mstp(d) == ms for d in ex.devs.values()):
+            return self.win.toast('Scan for devices first, then build the inventory')
+        self.live = True
+
+        def done(ok):
+            if ok:
+                self.win.on_ui(lambda: self.win.save_as('inv', self.inv_formats(), self.win.store_sv, 'Save site inventory'))
+        ex.run(ex.inventory, done)
+
+    def inv_formats(self):
+        return [f for f in self.win.formats('x') if f[0] in ('inventory', 'inventory.xlsx')][::-1]   # Excel first
 
     @staticmethod
     def csv_points(d):
@@ -1570,7 +1631,8 @@ class DiscoverView(QWidget):
             return doc('Discovered devices', f'<h3>Discovered devices</h3><p class="mu">Saved {stamp()}</p>' +
                        html_table(['Device ID', 'Name', 'Address', 'Vendor', 'Model', 'Status'], rows))
         return [('html', 'Web page – the discovered devices (*.html)', 'html', html),
-                ('csv', 'Spreadsheet – one row per device (*.csv)', 'csv', lambda: '﻿' + self.csv_devices())]
+                ('csv', 'Spreadsheet – one row per device (*.csv)', 'csv', lambda: '﻿' + self.csv_devices()),
+                ('inventory', 'Site inventory – devices with point counts (*.csv)', 'csv', lambda: '﻿' + self.csv_inventory())]
 
 
 # ============================================================ dialogs --

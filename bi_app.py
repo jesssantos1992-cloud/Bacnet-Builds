@@ -1147,6 +1147,8 @@ class MainWindow(QMainWindow):
         self.m_arm = act(m, 'Enable write access…', lambda: self.disarm() if self.explorer.armed() else self.arm_dlg())
         act(m, 'Scan network for devices', lambda: (self.goto('x'), self.view('x').scan()), 'Ctrl+D', lambda: not self.explorer.busy)
         act(m, 'Discovery options…', lambda: self.view('x').options())
+        act(m, 'Build site inventory…', lambda: (self.goto('x'), self.view('x').inventory()), None,
+            lambda: not self.explorer.busy)
         m.addSeparator()
         act(m, 'Send Who-Is (all devices)', lambda: self.send_msg('whois'))
         act(m, 'Send Who-Is-Router (all networks)', lambda: self.send_msg('whoisrouter'))
@@ -1184,6 +1186,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         act(m, 'What’s new', self.whats_new)
         act(m, 'Check for updates…', lambda: self.upd_check(True))
+        act(m, 'Report a problem…', self.report_problem)
         m.addSeparator()
         act(m, 'About BACnet Inspector', self.about)
 
@@ -2029,7 +2032,9 @@ class MainWindow(QMainWindow):
             out.append(f)
             if f[2] == 'csv':
                 lab = f[1].replace('Spreadsheet', 'Excel workbook').replace('(*.csv)', '(*.xlsx)')
-                out.append(('xlsx', lab, 'xlsx', lambda mk=f[3], v=v: csv_to_xlsx(mk(), VTITLE.get(v, 'Sheet1'))))
+                sheet = 'Site inventory' if f[0] == 'inventory' else VTITLE.get(v, 'Sheet1')
+                out.append(('xlsx' if f[0] == 'csv' else f[0] + '.xlsx', lab, 'xlsx',
+                            lambda mk=f[3], sheet=sheet: csv_to_xlsx(mk(), sheet)))
         return out
 
     def base_name(self):
@@ -2037,6 +2042,8 @@ class MainWindow(QMainWindow):
         return re.sub(r'\.(pcapng|pcap|cap)$', '', (self.ac.n if self.ac else 'capture') or 'capture', flags=re.I)
 
     def def_name(self, v, ext):
+        if v == 'inv':
+            return f"site-inventory-{time.strftime('%Y-%m-%d')}.{ext}"
         return f"{self.base_name()}-{VNAME.get(v, v)}{'-filtered' if v == 'p' and self.qbox.text().strip() else ''}.{ext}"
 
     def do_save(self, save_as):
@@ -2395,6 +2402,40 @@ class MainWindow(QMainWindow):
         w.tb.document().setDefaultStyleSheet(bi_manual.css())
         w.open_at(cid)
 
+    def report_problem(self):
+        """Help > Report a problem: what went wrong recently, ready to copy and send."""
+        import bi_log
+        d = QDialog(self)
+        d.setWindowTitle('Report a problem')
+        d.resize(760, 540)
+        v = QVBoxLayout(d)
+        v.setContentsMargins(22, 18, 22, 16)
+        n = bi_log.error_count()
+        v.addWidget(label('Report a problem', bold=True, size=15))
+        v.addWidget(label(('The app has logged ' + (f'{n} unexpected error' + ('s' if n != 1 else '')) if n else
+                           'No unexpected errors have been logged.') +
+                          ' Copy the details below and send them with a short note of what you were doing.', muted=True))
+        txt = QPlainTextEdit()
+        txt.setReadOnly(True)
+        txt.setFont(QFont('Cascadia Mono', 9))
+        txt.setPlainText(bi_log.system_info() + '\n\n' + (bi_log.recent() or '(the log is empty)'))
+        txt.moveCursor(txt.textCursor().MoveOperation.End)
+        v.addWidget(txt, 1)
+        h = QHBoxLayout()
+        cp = QPushButton('Copy details')
+        cp.clicked.connect(lambda: (QApplication.clipboard().setText(txt.toPlainText()), self.toast('Details copied')))
+        of = QPushButton('Open log folder')
+        of.clicked.connect(lambda: os.startfile(bi_log.log_dir()))
+        cl = QPushButton('Close')
+        cl.setDefault(True)
+        cl.clicked.connect(d.accept)
+        for b in (cp, of):
+            h.addWidget(b)
+        h.addStretch(1)
+        h.addWidget(cl)
+        v.addLayout(h)
+        d.exec()
+
     def help(self, w):
         if w in ('start', 'filter', 'bms', 'keys'):
             return self.manual({'start': 'quick', 'filter': 'filter', 'bms': 'discover', 'keys': 'keys'}[w])
@@ -2546,6 +2587,8 @@ def main():
     path = args[0] if args and os.path.isfile(args[0]) else None
     if '--new-instance' not in sys.argv and hand_off(path):
         return 0
+    import bi_log
+    bi_log.install()
     store = Store()
     apply_theme(store.get('bi_theme') or '')
     U.apply_fonts(app)
@@ -2557,6 +2600,8 @@ def main():
     except AttributeError:
         pass
     w.open_first = path
+    bi_log.on_error = lambda s: w.bridge.call.emit(
+        lambda: w.toast('Something went wrong – it was saved to the problem log', w.report_problem, 'Details'))
     srv = QLocalServer()
     QLocalServer.removeServer(SERVER)
     if srv.listen(SERVER):
