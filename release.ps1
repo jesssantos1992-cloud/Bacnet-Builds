@@ -22,6 +22,8 @@ if (-not (Get-Content release_notes.txt -Raw -ErrorAction SilentlyContinue)) { F
 $feed = (Get-Content update_url.txt -Raw).Trim()
 if ($feed -notmatch '^https://github\.com/([^/]+)/([^/]+)/releases/latest/download/update\.json$') { Fail 'update_url.txt is not a GitHub releases address.' }
 $owner, $repo = $Matches[1], $Matches[2]
+# set with: setx GITHUB_TOKEN "..."  (read from the user's settings too, so no new window is needed after setx)
+if (-not $env:GITHUB_TOKEN) { $env:GITHUB_TOKEN = [Environment]::GetEnvironmentVariable('GITHUB_TOKEN', 'User') }
 $publish = $env:GITHUB_TOKEN -and -not $NoPublish
 $api = "https://api.github.com/repos/$owner/$repo"
 $hdr = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
