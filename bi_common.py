@@ -206,6 +206,91 @@ def csv_text(header, rows):
     return '\r\n'.join([header] + [','.join(csvc(c) for c in r) for r in rows])
 
 
+# ------------------------------------------------------------ Excel (.xlsx) --
+_NUMCELL = re.compile(r'^-?(0|[1-9]\d{0,14})(\.\d+)?$')
+_BADXML = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def _col(n):
+    s = ''
+    n += 1
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def xlsx(rows, sheet='Sheet1'):
+    """A small Excel workbook (bold, frozen, filterable header row; sized columns) from a list of rows."""
+    import io
+    import zipfile
+    from xml.sax.saxutils import escape
+    rows = [list(r) for r in rows] or [['']]
+    ncol = max(len(r) for r in rows)
+    width = [8] * ncol
+    out = []
+    for i, r in enumerate(rows):
+        cells = []
+        for j, v in enumerate(r):
+            v = '' if v is None else str(v)
+            width[j] = min(60, max(width[j], len(v) + 2))
+            ref = f'{_col(j)}{i + 1}'
+            if i and _NUMCELL.match(v):
+                cells.append(f'<c r="{ref}"><v>{v}</v></c>')
+            elif v:
+                st = ' s="1"' if i == 0 else ''
+                cells.append(f'<c r="{ref}" t="inlineStr"{st}><is><t xml:space="preserve">{escape(_BADXML.sub("", v))}</t></is></c>')
+        out.append(f'<row r="{i + 1}">{"".join(cells)}</row>')
+    cols = ''.join(f'<col min="{j + 1}" max="{j + 1}" width="{w}" customWidth="1"/>' for j, w in enumerate(width))
+    ws = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+          '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+          f'</sheetView></sheetViews><cols>{cols}</cols><sheetData>{"".join(out)}</sheetData>'
+          f'<autoFilter ref="A1:{_col(ncol - 1)}{len(rows)}"/></worksheet>')
+    files = {
+        '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+        '_rels/.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+        'xl/workbook.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<sheets><sheet name="{escape(sheet[:31])}" sheetId="1" r:id="rId1"/></sheets>'
+        f'<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">\'{escape(sheet[:31])}\'!$A$1:${_col(ncol - 1)}${len(rows)}</definedName></definedNames></workbook>',
+        'xl/_rels/workbook.xml.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+        'xl/styles.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+        'xl/worksheets/sheet1.xml': ws}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def csv_to_xlsx(text, sheet='Sheet1'):
+    """The same table as a CSV export, as an Excel workbook."""
+    import csv
+    import io
+    return xlsx(list(csv.reader(io.StringIO(text.lstrip('﻿')))), sheet)
+
+
 # ----------------------------------------------------------- table widget --
 class Table(QTableWidget):
     """A read-only table. Each cell is text or (text, style) where style may set

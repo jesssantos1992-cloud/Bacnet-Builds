@@ -153,6 +153,7 @@ class MstpLink:
         self._last_tok = 0.0
         self._sent = collections.deque(maxlen=16)
         self.frames_rx = 0
+        self.on_frame = None           # called with every raw frame sent or received (shown in the Live capture tab)
 
     # ------------------------------------------------------------------ public --
     def start(self):
@@ -186,6 +187,8 @@ class MstpLink:
         f = frame(ty, dst, self.ts, data)
         self._sent.append(f)
         self.sp.write(f)
+        if self.on_frame:
+            self.on_frame(f)
         self.last_rx = time.perf_counter() + len(f) * 10 / self.baud      # the line is busy while we send
 
     def _read(self, wait=0.0):
@@ -207,6 +210,8 @@ class MstpLink:
                         self._fail(f'Another device on the trunk is using MAC {self.ts}. Left the trunk – pick a free address.')
                         return []
                     self.frames_rx += 1
+                    if self.on_frame:
+                        self.on_frame(frame(*f))
                     out.append(f)
             if out or time.perf_counter() >= end:
                 return out

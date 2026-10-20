@@ -329,6 +329,7 @@ class DiscoverView(QWidget):
         if link and link.on:
             link.stop()
             self.ex.link = None
+            self.win.mstp_feed(False)
             self._ms_msg('Left the trunk.')
             self.ms_join.setText('Join trunk')
             for w in (self.ms_port, self.ms_baud, self.ms_mac, self.ms_detect, self.ms_find):
@@ -354,12 +355,15 @@ class DiscoverView(QWidget):
             return self._ms_msg(busy, True)
         link = M.MstpLink(port, baud, mac, on_npdu=self.ex.rx_mstp, on_status=self.ex.notify,
                           allow_create=not info['frames'])
+        cap = self.win.cap
+        link.on_frame = lambda raw: cap.add(time.time(), 165, raw)      # every frame also shows in Live capture
         try:
             link.start()
         except Exception as e:
             import bacnet_live as BL
             return self._ms_msg(BL.serial_error(e, port), True)
         self.ex.link = link
+        self.win.mstp_feed(True)
         self.ex.pump()
         self.ms_join.setText('Leave trunk')
         for w in (self.ms_port, self.ms_baud, self.ms_mac, self.ms_detect, self.ms_find):
@@ -374,6 +378,7 @@ class DiscoverView(QWidget):
         if not link.on and link.error:
             self._ms_msg(link.error, True)
             self.ex.link = None
+            self.win.mstp_feed(False)
             self.ms_join.setText('Join trunk')
             for w in (self.ms_port, self.ms_baud, self.ms_mac, self.ms_detect, self.ms_find):
                 w.setEnabled(True)
@@ -866,9 +871,14 @@ class DiscoverView(QWidget):
         b2.clicked.connect(lambda: self.show_packets(en['filt']))
         r.addWidget(b2)
         if e and e.get('objs'):
-            b3 = QPushButton('Export points (.csv)')
+            b3 = QPushButton('Export points…')
             b3.clicked.connect(lambda: self.save_csv(f"device-{e['id']}-points.csv", self.csv_points(e)))
             r.addWidget(b3)
+        ba = QPushButton('Active alarms')
+        ba.setToolTip('Ask the device which of its points are in alarm (read-only)')
+        ba.setEnabled(bool(e or en['cap']))
+        ba.clicked.connect(lambda: self.read_alarms(en))
+        r.addWidget(ba)
         r.addWidget(label((e or {}).get('pm') or '', muted=True, wrap=False))
         r.addStretch(1)
         ww = QWidget()
@@ -880,6 +890,32 @@ class DiscoverView(QWidget):
                 ('Firmware', e and e.get('fw')), ('Software', e and e.get('sw')), ('Location', e and e.get('loc')),
                 ('Description', e and e.get('desc')), ('Max APDU', e and e.get('mx')), ('Status', e and e.get('st'))]
         p.add(self.info_grid([(k, v) for k, v in info if v]))
+        al = (e or {}).get('alarms')
+        if al is not None or (e or {}).get('alarms_busy'):
+            c = colors()
+            p.add(heading('Active alarms', 12))
+            if (e or {}).get('alarms_busy'):
+                p.add(label('⏳ Asking the device for its alarms…', muted=True))
+            elif al.get('err') and not al['items']:
+                er = label(f"Could not read the alarms: {al['err']}")
+                er.setStyleSheet(f"color:{c['se']}")
+                p.add(er)
+            elif not al['items']:
+                ok = label(f"✓ No active alarms or events (checked {time.strftime('%H:%M:%S', time.localtime(al['at']))}).", bold=True)
+                ok.setStyleSheet(f"color:{c['no']}")
+                p.add(ok)
+            else:
+                p.add(label(f"{len(al['items'])} point{'' if len(al['items']) == 1 else 's'} in alarm or fault "
+                            f"(checked {time.strftime('%H:%M:%S', time.localtime(al['at']))}). Double-click a row to open the point.",
+                            muted=True))
+                t = Table(['Point', 'Object', 'State', 'Acknowledged', 'Type'])
+                t.fill([[a['name'] or '–', f"{E.sd_ty(E.o_t(a['o']))} {E.o_i(a['o'])}",
+                         (a['state'], {'fg': c['wa'] if a['state'] != 'fault' else c['se'], 'bold': True}),
+                         (a['acked'], {'fg': c['se'] if a['acked'] == 'no' else c['mu']}), a['notify']] for a in al['items']],
+                       [{'k': e['key'], 'o': a['o']} for a in al['items']])
+                t.rowActivated.connect(lambda n: n and any(x['o'] == n['o'] for x in e.get('objs') or []) and self.go_node(n))
+                t.fit_height()
+                p.add(t)
         cats = self.ex.cats(e) if e else []
         if cats:
             p.add(heading('Points', 12))
@@ -1006,6 +1042,25 @@ class DiscoverView(QWidget):
         f3.addRow('Reliability:', ro(g.get('rel') or '?'))
         f3.addRow('Profile Name:', ro(g.get('prof') or '?'))
         dv.addLayout(f3)
+        section('Alarm & status')
+        f5 = QFormLayout()
+        flags = g.get('flags', '')
+        fl = ro(flags or '?')
+        if flags and flags != 'normal':
+            fl.setStyleSheet(f"color:{colors()['se']};font-weight:600")
+        f5.addRow('Status Flags:', fl)
+        f5.addRow('Event State:', ro(g.get('es') or '?'))
+        for k, t in (('hi', 'High Limit:'), ('lo', 'Low Limit:'), ('db', 'Deadband:'), ('nc', 'Notification Class:')):
+            if g.get(k):
+                f5.addRow(t, ro(g[k]))
+        dv.addLayout(f5)
+        ra = QPushButton('Read all properties…')
+        ra.setToolTip('Read every property of this point from the device, with a copy / export button')
+        ra.clicked.connect(lambda: all_props_dialog(self, e, o))
+        rr = QHBoxLayout()
+        rr.addWidget(ra)
+        rr.addStretch(1)
+        dv.addLayout(rr)
         plb = QToolButton(text='Property List ' + ('▴' if o.get('pl') else '▾'))
         plb.clicked.connect(lambda: self._toggle_pl(e, o))
         dv.addWidget(plb)
@@ -1172,6 +1227,24 @@ class DiscoverView(QWidget):
             self.win.on_ui(done)
         self.ex.run(work)
 
+    def read_alarms(self, en):
+        e = en['ex'] or (en['cap'] and self.ex.ensure(en['cap']))
+        if not e:
+            if self.is_ms(en):
+                return self._ms_msg('This device is on an MS/TP trunk: join the trunk first.', True)
+            return self.win.toast('This device is not reachable by IP')
+        e['alarms_busy'] = 1
+        self.node = {'k': e['key']} if not self.node else self.node
+
+        def work():
+            try:
+                self.ex.alarms(e)
+            finally:
+                e['alarms_busy'] = 0
+                self.ex.notify()
+        self.ex.run(work)
+        self.refresh()
+
     def read_points(self, en):
         e = en['ex'] or (en['cap'] and self.ex.ensure(en['cap']))
         if not e:
@@ -1308,14 +1381,26 @@ class DiscoverView(QWidget):
                           w.get('hi') or ''] for w in self.ex.wlog])
 
     def save_csv(self, name, text):
-        p, _ = QFileDialog.getSaveFileName(self, 'Save', name, 'Spreadsheet (*.csv)')
-        if p:
-            try:
+        """Save a table as Excel (.xlsx) or a spreadsheet (.csv) - the user picks in the Save dialog."""
+        from bi_common import csv_to_xlsx
+        xl, cs = 'Excel workbook (*.xlsx)', 'Spreadsheet (*.csv)'
+        base = name.rsplit('.', 1)[0]
+        p, chosen = QFileDialog.getSaveFileName(self, 'Save', base + '.xlsx', f'{xl};;{cs}', xl)
+        if not p:
+            return
+        as_xl = chosen == xl or p.lower().endswith('.xlsx')
+        if not p.lower().endswith(('.xlsx', '.csv')):
+            p += '.xlsx' if as_xl else '.csv'
+        try:
+            if as_xl:
+                with open(p, 'wb') as f:
+                    f.write(csv_to_xlsx(text, base[:31]))
+            else:
                 with open(p, 'w', encoding='utf-8-sig', newline='') as f:
                     f.write(text)
-                self.win.toast('Saved ' + p)
-            except OSError as e:
-                self.win.toast(f'Save failed: {e.strerror}')
+            self.win.toast('Saved ' + p)
+        except OSError as e:
+            self.win.toast(f'Save failed: {e.strerror}')
 
     def formats(self):
         def html():
@@ -1328,6 +1413,55 @@ class DiscoverView(QWidget):
 
 
 # ============================================================ dialogs --
+def all_props_dialog(view, dev, o):
+    """Every property of one point, read live, with Copy and Export."""
+    win, ex = view.win, view.ex
+    d = QDialog(win)
+    name = o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"
+    d.setWindowTitle(f"All properties – {name}")
+    v = QVBoxLayout(d)
+    v.addWidget(label(f"Device {dev['id']}" + (f" “{dev['name']}”" if dev.get('name') else '') +
+                      f" · {E.sd_ty(o['ty'])} {o['inst']} · read just now from the device (read-only)", muted=True))
+    msg = label('⏳ Reading every property…', muted=True)
+    v.addWidget(msg)
+    t = Table(['Property', 'Value'])
+    t.setWordWrap(True)
+    v.addWidget(t, 1)
+    bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+    cp = bb.addButton('Copy', QDialogButtonBox.ButtonRole.ActionRole)
+    xp = bb.addButton('Export…', QDialogButtonBox.ButtonRole.ActionRole)
+    cp.setEnabled(False)
+    xp.setEnabled(False)
+    bb.rejected.connect(d.reject)
+    v.addWidget(bb)
+    rows = []
+
+    def done(res, err):
+        if err:
+            msg.setText(err)
+            msg.setStyleSheet(f"color:{colors()['se']}")
+            return
+        rows[:] = sorted(res, key=lambda x: x[0])
+        msg.setText(f'{len(rows)} properties')
+        t.fill([[a, b] for a, b in rows])
+        t.resizeRowsToContents()
+        cp.setEnabled(True)
+        xp.setEnabled(True)
+
+    def work():
+        try:
+            res, err = ex.read_all(dev, o['o']), ''
+        except RuntimeError as e:
+            res, err = [], str(e)
+        win.on_ui(lambda: done(res, err))
+    cp.clicked.connect(lambda: (QApplication.clipboard().setText('\n'.join(f'{a}\t{b}' for a, b in rows)), win.toast('Copied')))
+    xp.clicked.connect(lambda: view.save_csv(f"device-{dev['id']}-{E.ABBR.get(o['ty'], 'obj').lower()}{o['inst']}-properties.csv",
+                                             csv_text('Property,Value', rows)))
+    ex.run(work)
+    d.resize(640, 620)
+    d.exec()
+
+
 def arm_dialog(win):
     d = QDialog(win)
     d.setWindowTitle('Turn on write access?')

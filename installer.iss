@@ -39,6 +39,10 @@ SignedUninstaller=yes
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 Name: "assoc"; Description: "Add BACnet Inspector to the &Open with menu for .pcap and .pcapng files"; GroupDescription: "File types:"
 
+[InstallDelete]
+; Clear the previous version's program files so parts removed in an update do not linger (settings live elsewhere).
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 Source: "dist\BACnet Inspector\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 

@@ -221,9 +221,13 @@ def locale_int(n) -> str:
         return str(n)
 
 
+_DIGITS = re.compile(r'(\d+)')
+
+
 def natural_key(s):
     """Sort key that orders 'MAC 9' before 'MAC 10' (like localeCompare with numeric: true)."""
-    return [(0, int(x), '') if x.isdigit() else (1, 0, x.lower()) for x in re.split(r'(\d+)', str(s)) if x != '']
+    return tuple((0, int(p), '') if i & 1 else (1, 0, p)
+                 for i, p in enumerate(_DIGITS.split(str(s).lower())) if p)
 
 
 def jsround(x) -> int:

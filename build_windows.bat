@@ -37,6 +37,14 @@ echo Building the application...
   --hidden-import serial.win32 ^
   bi_app.py || (echo Build failed & pause & exit /b 1)
 
+echo Removing parts of Qt the app does not use (smaller download)...
+set "QT=dist\BACnet Inspector\_internal\PySide6"
+for %%F in (opengl32sw.dll Qt6Quick.dll Qt6Qml.dll Qt6QmlMeta.dll Qt6QmlModels.dll Qt6QmlWorkerScript.dll Qt6Pdf.dll Qt6VirtualKeyboard.dll) do if exist "%QT%\%%F" del /q "%QT%\%%F"
+for %%F in (qdirect2d.dll qminimal.dll qoffscreen.dll) do if exist "%QT%\plugins\platforms\%%F" del /q "%QT%\plugins\platforms\%%F"
+for %%F in (qpdf.dll qgif.dll qicns.dll qjpeg.dll qtga.dll qtiff.dll qwbmp.dll qwebp.dll) do if exist "%QT%\plugins\imageformats\%%F" del /q "%QT%\plugins\imageformats\%%F"
+if exist "%QT%\plugins\platforminputcontexts" rmdir /s /q "%QT%\plugins\platforminputcontexts"
+if exist "%QT%\translations" rmdir /s /q "%QT%\translations"
+
 call "%~dp0sign.bat" "dist\BACnet Inspector\BACnet Inspector.exe" || (echo Signing failed & pause & exit /b 1)
 
 echo.

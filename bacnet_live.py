@@ -567,8 +567,8 @@ def send_request(body):
 # Network scan relay for the "Explorer" tab.
 # The page builds BACnet requests; this relay only carries them. It is deliberately READ-ONLY:
 # every packet is parsed here and refused unless it is Who-Is, Who-Has, ReadProperty,
-# ReadPropertyMultiple, ReadRange, Segment-ACK, Who-Is-Router-To-Network or
-# What-Is-Network-Number.
+# ReadPropertyMultiple, ReadRange, GetAlarmSummary, GetEventInformation, Segment-ACK,
+# Who-Is-Router-To-Network or What-Is-Network-Number.
 # The ONLY thing that can change a device is WriteProperty of present-value (with optional
 # priority, or NULL to relinquish) to ONE device by unicast, and only while write access has
 # been switched on by the user (it switches itself off after a few minutes). Every write is
@@ -617,7 +617,9 @@ def _read_only_ok(d: bytes, armed: bool = False) -> str:
             return "Segmented requests are not allowed."
         if d[i + 3] == 15:
             return _write_ok(d, i + 4, armed)
-        return "" if d[i + 3] in (12, 14, 26) else "Only Read Property, Read Property Multiple and Read Range are allowed."
+        # 12/14/26 = Read Property / Read Property Multiple / Read Range; 3 / 29 = Get Alarm Summary /
+        # Get Event Information (read-only alarm lists)
+        return "" if d[i + 3] in (12, 14, 26, 3, 29) else "Only reads and alarm lists are allowed."
     if t == 4:                                           # segment ACK
         return ""
     return "Message type not allowed."

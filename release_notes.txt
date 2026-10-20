@@ -7,3 +7,9 @@
 - MS/TP trunk: clearer message when a capture has no token passing in it.
 - PuTTY is now included: Tools > PuTTY opens it for SSH, Telnet or a serial console.
 - Discover over MS/TP: choose Connection: MS/TP, pick your USB RS-485 adapter, press Join trunk. The PC listens first, picks a free MAC address, joins the token ring and can scan and read points directly on the trunk (no router needed).
+- Excel export: every Save / Export menu now offers an Excel (.xlsx) version next to CSV.
+- Discover: Active alarms button on a device lists points in alarm (state, acknowledged, type).
+- Point details: new Alarm & status section (status flags, event state, high/low limits, deadband, notification class) and a Read all properties button with Copy and Export.
+- While Discover is joined to an MS/TP trunk, its frames show in the Live capture tab so you can see the traffic.
+- Sorting a very large capture no longer freezes the window, and re-sorting is much faster.
+- Smaller download: unused parts of Qt are no longer included.

@@ -29,6 +29,56 @@ CATS = [(0, 'Analog Inputs'), (1, 'Analog Outputs'), (2, 'Analog Values'), (3, '
 ABBR = {0: 'AI', 1: 'AO', 2: 'AV', 3: 'BI', 4: 'BO', 5: 'BV', 8: 'DEV', 13: 'MSI', 14: 'MSO', 19: 'MSV', 17: 'SCH',
         20: 'TL', 10: 'FILE', 15: 'NC', 12: 'LOOP', 6: 'CAL', 7: 'CMD', 9: 'EE'}
 CMD_T = (1, 2, 4, 5, 14, 19)          # commandable object types (outputs and values)
+EVENT_STATE = {0: 'normal', 1: 'fault', 2: 'off-normal', 3: 'high limit', 4: 'low limit', 5: 'life-safety alarm'}
+NOTIFY_TYPE = {0: 'alarm', 1: 'event', 2: 'acknowledgement'}
+STATUS_FLAGS = ['in alarm', 'fault', 'overridden', 'out of service']
+
+# Standard BACnet property identifiers (ASHRAE 135), for "Read all properties"
+PROPS = dict(enumerate(
+    'acked-transitions ack-required action action-text active-text active-vt-sessions alarm-value alarm-values all '
+    'all-writes-successful apdu-segment-timeout apdu-timeout application-software-version archive bias change-of-state-count '
+    'change-of-state-time notification-class - controlled-variable-reference controlled-variable-units controlled-variable-value '
+    'cov-increment date-list daylight-savings-status deadband derivative-constant derivative-constant-units description '
+    'description-of-halt device-address-binding device-type effective-period elapsed-active-time error-limit event-enable '
+    'event-state event-type exception-schedule fault-values feedback-value file-access-method file-size file-type '
+    'firmware-revision high-limit inactive-text in-process instance-of integral-constant integral-constant-units - '
+    'limit-enable list-of-group-members list-of-object-property-references - local-date local-time location low-limit '
+    'manipulated-variable-reference maximum-output max-apdu-length-accepted max-info-frames max-master max-pres-value '
+    'minimum-off-time minimum-on-time minimum-output min-pres-value model-name modification-date notify-type '
+    'number-of-apdu-retries number-of-states object-identifier object-list object-name object-property-reference object-type '
+    'optional out-of-service output-units event-parameters polarity present-value priority priority-array priority-for-writing '
+    'process-identifier program-change program-location program-state proportional-constant proportional-constant-units - '
+    'protocol-object-types-supported protocol-services-supported protocol-version read-only reason-for-halt recipient '
+    'recipient-list reliability relinquish-default required resolution segmentation-supported setpoint setpoint-reference '
+    'state-text status-flags system-status time-delay time-of-active-time-reset time-of-state-count-reset '
+    'time-synchronization-recipients units update-interval utc-offset vendor-identifier vendor-name vt-classes-supported '
+    'weekly-schedule attempted-samples average-value buffer-size client-cov-increment cov-resubscription-interval - '
+    'event-time-stamps log-buffer log-device-object-property enable log-interval maximum-value minimum-value '
+    'notification-threshold - protocol-revision records-since-notification record-count start-time stop-time stop-when-full '
+    'total-record-count valid-samples window-interval window-samples maximum-value-timestamp minimum-value-timestamp '
+    'variance-value active-cov-subscriptions backup-failure-timeout configuration-files database-revision direct-reading '
+    'last-restore-time maintenance-required member-of mode operation-expected setting silenced tracking-value zone-members '
+    'life-safety-alarm-values max-segments-accepted profile-name auto-slave-discovery manual-slave-address-binding '
+    'slave-address-binding slave-proxy-enable last-notify-record schedule-default accepted-modes adjust-value count '
+    'count-before-change count-change-time cov-period input-reference limit-monitoring-interval logging-object '
+    'logging-record prescale pulse-rate scale scale-factor update-time value-before-change value-set value-change-time '
+    'align-intervals - interval-offset last-restart-reason logging-type'.split()))
+PROPS = {k: v for k, v in PROPS.items() if v != '-'}
+PROPS.update({202: 'restart-notification-recipients', 203: 'time-of-device-restart', 204: 'time-synchronization-interval',
+              205: 'trigger', 206: 'utc-time-synchronization-recipients', 207: 'node-subtype', 208: 'node-type',
+              209: 'structured-object-list', 210: 'subordinate-annotations', 211: 'subordinate-list', 371: 'property-list',
+              372: 'serial-number', 380: 'current-command-priority'})
+
+
+def prop_name(p):
+    return PROPS.get(p) or C.PR.get(p) or f'property {p}'
+
+
+def status_flags(v):
+    """'0100' (in alarm, fault, overridden, out of service) -> 'fault' / 'normal'."""
+    s = str(v or '')
+    on = [STATUS_FLAGS[i] for i, b in enumerate(s[:4]) if b == '1']
+    return ', '.join(on) if on else ('normal' if s else '')
 WHINT = [('write access denied', 'The point is read-only, or not commandable, or needs a password / higher permission.'),
          ('value out of range', 'The value is outside the limits set in the device (min / max).'),
          ('unknown object', 'That object does not exist any more in the device.'),
@@ -764,7 +814,10 @@ class Explorer:
 
     def read_detail(self, dev, row):
         pd = {'ok': 0}
-        r = self.req(dev, ex_rpm([[row['o'], [77, 28, 85, 117, 22, 106, 69, 65, 81, 103, 167, 104, 87]]]), 5.0)
+        r = self.req(dev, ex_rpm([[row['o'], [77, 28, 85, 117, 22, 106, 69, 65, 81, 103, 168, 104, 87,
+                                                111, 36, 45, 59, 25, 17]]]), 5.0)
+        if r.get('seg') or r.get('rej') or r.get('abort'):        # too much for one answer: ask for less
+            r = self.req(dev, ex_rpm([[row['o'], [77, 28, 85, 117, 22, 106, 69, 65, 81, 103, 168, 104, 87]]]), 5.0)
         if r.get('d'):
             L = ex_dec_rpm(r['d'], r['k'], r['L'])
             if L:
@@ -776,9 +829,12 @@ class Explorer:
 
                 def S(p):
                     v = g(p)
-                    return unq(v['s']) if v else ''
+                    return unq(v['s']) if v and v['n'] != 0 else ''        # a NULL value shows as blank
                 pd['ok'] = 1
-                pd.update(cov=S(22), res=S(106), min=S(69), max=S(65), rel=S(103), prof=S(167), rd=S(104))
+                pd.update(cov=S(22), res=S(106), min=S(69), max=S(65), rel=S(103), prof=S(168), rd=S(104),
+                          hi=S(45), lo=S(59), db=S(25), nc=S(17), flags=status_flags(S(111)))
+                es = g(36)
+                pd['es'] = EVENT_STATE.get(es['raw'], es['s']) if es and es['raw'] is not None else ''
                 o = g(81)
                 pd['oos'] = (o['raw'] == 1 or 'true' in o['s'].lower()) if o else None
                 binary = 3 <= row['ty'] <= 5
@@ -805,6 +861,148 @@ class Explorer:
             pd['err'] = 'No answer from the device.' if r.get('to') else (r.get('err') or 'Could not read the details.')
         row['pd'] = pd
         self.notify()
+
+    def read_all(self, dev, o):
+        """Every property of one object: [(name, value text)] or raises RuntimeError.
+        Asks for 'all' first; if the answer is too big, reads the property list and then a few at a time."""
+        def word(p, v):
+            """Enumerations and flags in words (units, object type, event state, status flags, reliability)."""
+            raw = v.get('raw')
+            if p == 117 and raw is not None:
+                return f"{EXU.get(raw, '')} ({raw})" if EXU.get(raw) else str(raw)
+            if p == 79 and raw is not None:
+                return C.tyname(raw)
+            if p in (36,) and raw is not None:
+                return EVENT_STATE.get(raw, str(raw))
+            if p == 111:
+                return status_flags(v['s'])
+            if p == 103 and raw is not None:
+                return {0: 'no fault detected', 1: 'no sensor', 2: 'over range', 3: 'under range', 4: 'open loop',
+                        5: 'shorted loop', 6: 'no output', 7: 'unreliable other', 8: 'process error',
+                        12: 'communication failure'}.get(raw, str(raw))
+            if p == 85 and v['n'] == 9 and 3 <= o_t(o) <= 5 and raw is not None:
+                return 'active' if raw == 1 else 'inactive'
+            return unq(v['s'])
+
+        def text(items, p=None):
+            if items is None:
+                return '(error)'
+            vals = [word(p, v) for v in items]
+            return ', '.join(vals) if len(vals) <= 20 else ', '.join(vals[:20]) + f' … ({len(vals)} values)'
+        r = self.req(dev, ex_rpm([[o, [8]]]), 6.0)
+        if r.get('d'):
+            L = ex_dec_rpm(r['d'], r['k'], r['L'])
+            if L and L[0]['pr']:
+                return [(prop_name(p), text(v, p)) for p, v in L[0]['pr'].items()]
+        if r.get('fatal'):
+            raise RuntimeError(r['err'])
+        q = self.req(dev, ex_rpm([[o, [371]]]), 5.0)
+        x = ex_dec_rpm(q['d'], q['k'], q['L']) if q.get('d') else None
+        plist = [v['raw'] for v in (x[0]['pr'].get(371) or [])] if x else []
+        if not plist:
+            raise RuntimeError('The device would not list its properties' +
+                               (f" ({r.get('err') or q.get('err')})" if (r.get('err') or q.get('err')) else '.'))
+        out = []
+        for i in range(0, len(plist), 6):
+            part = plist[i:i + 6]
+            a = self.req(dev, ex_rpm([[o, part]]), 5.0)
+            got = ex_dec_rpm(a['d'], a['k'], a['L']) if a.get('d') else []
+            pr = got[0]['pr'] if got else {}
+            for p in part:
+                if p in pr:
+                    out.append((prop_name(p), text(pr[p], p)))
+                else:                                         # one at a time when the group failed
+                    b = self.req(dev, ex_rp(o, p), 4.0)
+                    y = ex_dec_rp(b['d'], b['k'], b['L']) if b.get('d') else None
+                    out.append((prop_name(p), text(y['it'], p) if y else '(' + (b.get('err') or 'no answer') + ')'))
+        return out
+
+    def alarms(self, dev):
+        """Active alarms and events in a device (Get Event Information, else Get Alarm Summary).
+        Stores dev['alarms'] = {'items': [{'o','state','acked','notify','name'}], 'at', 'err'}."""
+        items, err, last, svc = [], '', None, 29
+        for _page in range(20):
+            apdu = [0, 5, 0, 29] + ([0x0C, *be4(last)] if last is not None else [])
+            r = self.req(dev, apdu, 5.0)
+            if not r.get('d'):
+                err = 'No answer from the device.' if r.get('to') else (r.get('err') or 'failed')
+                break
+            more, last = self._parse_events(r['d'], r['k'], r['L'], items)
+            if not more or last is None:
+                break
+        if err and not items and err != 'No answer from the device.':     # refused: an older device
+            svc, err = 3, ''
+            r = self.req(dev, [0, 5, 0, 3], 5.0)                # older devices: Get Alarm Summary
+            if r.get('d'):
+                self._parse_alarm_summary(r['d'], r['k'], r['L'], items)
+            else:
+                err = 'No answer from the device.' if r.get('to') else (r.get('err') or 'failed')
+        names = {o['o']: o['name'] for o in dev.get('objs') or [] if o.get('name')}
+        missing = [it['o'] for it in items if it['o'] not in names]
+        for i in range(0, len(missing), 8):
+            q = self.req(dev, ex_rpm([[o, [77]] for o in missing[i:i + 8]]), 4.0)
+            for e in (ex_dec_rpm(q['d'], q['k'], q['L']) if q.get('d') else []):
+                v = e['pr'].get(77)
+                if v:
+                    names[e['o']] = unq(v[0]['s'])
+        for it in items:
+            it['name'] = names.get(it['o'], '')
+        dev['alarms'] = {'items': items, 'at': time.time(), 'err': err, 'svc': svc}
+        self.notify()
+        return dev['alarms']
+
+    @staticmethod
+    def _acked(b):
+        """acknowledged-transitions bit string (to-offnormal, to-fault, to-normal) -> 'yes' / 'no' / partial."""
+        if len(b) < 2:
+            return ''
+        bits = [(b[1] >> (7 - i)) & 1 for i in range(3)]
+        return 'yes' if all(bits) else 'no' if not any(bits) else 'partly'
+
+    def _parse_events(self, d, k, L, items):
+        """GetEventInformation-ACK: list of event summaries [0], then moreEvents [1]."""
+        a = C.tg(d, k)
+        if not (a.cx and a.n == 0 and a.o == 1):
+            return False, None
+        k = a.v
+        cur = None
+        while k < L:
+            a = C.tg(d, k)
+            if a.cx and a.o == 2 and a.n == 0:
+                k = a.v
+                break
+            if a.cx and a.o == 1:
+                k = C.skip(d, a.v, L)
+                continue
+            val = d[a.v:a.v + a.len]
+            if a.cx and a.n == 0:
+                cur = {'o': C.num(val), 'state': '', 'acked': '', 'notify': ''}
+                items.append(cur)
+            elif a.cx and cur is not None and a.n == 1:
+                cur['state'] = EVENT_STATE.get(C.num(val), f'state {C.num(val)}')
+            elif a.cx and cur is not None and a.n == 2:
+                cur['acked'] = self._acked(val)
+            elif a.cx and cur is not None and a.n == 4:
+                cur['notify'] = NOTIFY_TYPE.get(C.num(val), '')
+            k = a.v + a.len
+        a = C.tg(d, k) if k < L else None
+        more = bool(a and a.cx and a.n == 1 and C.num(d[a.v:a.v + a.len]))
+        return more, (items[-1]['o'] if items else None)
+
+    def _parse_alarm_summary(self, d, k, L, items):
+        """GetAlarmSummary-ACK: (object id, alarm state, acknowledged transitions) repeated."""
+        cur = None
+        while k < L:
+            a = C.tg(d, k)
+            val = d[a.v:a.v + a.len]
+            if not a.cx and a.n == 12:
+                cur = {'o': C.num(val), 'state': '', 'acked': '', 'notify': 'alarm'}
+                items.append(cur)
+            elif not a.cx and a.n == 9 and cur is not None:
+                cur['state'] = EVENT_STATE.get(C.num(val), f'state {C.num(val)}')
+            elif not a.cx and a.n == 8 and cur is not None:
+                cur['acked'] = self._acked(val)
+            k = a.v + (0 if (not a.cx and a.n == 1) else a.len)
 
     def read_prop_list(self, dev, row):
         r = self.req(dev, ex_rpm([[row['o'], [371]]]), 5.0)

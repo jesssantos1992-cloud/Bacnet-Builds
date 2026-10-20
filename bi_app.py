@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 
 import bacnet_live as BL
 import bi_core as C
-from bi_common import HighlightDelegate, Labels, colors, csv_text, doc, esc, html_table, is_dark, label, stamp
+from bi_common import HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark, label, stamp
 from bi_store import Store
 
 APP_NAME = 'BACnet Inspector'
@@ -443,11 +443,49 @@ class PacketsPane(QWidget):
         if sqt and self.mode_f.isChecked():
             m = C.search_matcher(sqt)
             V = [r for r in V if m(r)]
+        self._gen = getattr(self, '_gen', 0) + 1
         if self.sort:
-            g = SORTKEY[self.sort[0]]
-            num = self.sort[0] in ('no', 't', 'len')
             # V is in capture order and Python's sort is stable, so equal values stay in capture order both ways
-            V = sorted(V, key=g if num else (lambda r: C.natural_key(g(r))), reverse=self.sort[1] < 0)
+            key, rev, gen = self._sort_key(), self.sort[1] < 0, self._gen
+            if len(V) > 60000:                      # big capture: sort in the background, keep the window responsive
+                if not getattr(self, '_waiting', False):
+                    self._waiting = True
+                    QApplication.setOverrideCursor(Qt.CursorShape.BusyCursor)
+                win.st.setText(f'Sorting {C.locale_int(len(V))} packets…')
+
+                def work(V=V):
+                    S = sorted(V, key=key, reverse=rev)
+                    win.on_ui(lambda: self._sorted(gen, S, sqt, keep))
+                threading.Thread(target=work, daemon=True).start()
+                return
+            V = sorted(V, key=key, reverse=rev)
+        self._apply(V, sqt, keep)
+
+    def _sort_key(self):
+        """Sort key for the chosen column; text keys are worked out once per packet and remembered."""
+        k = self.sort[0]
+        g = SORTKEY[k]
+        if k in ('no', 't', 'len'):
+            return g
+        attr = '_sk_' + k
+
+        def key(r):
+            v = r.__dict__.get(attr)
+            if v is None:
+                v = C.natural_key(g(r))
+                setattr(r, attr, v)
+            return v
+        return key
+
+    def _sorted(self, gen, S, sqt, keep):
+        if getattr(self, '_waiting', False):
+            self._waiting = False
+            QApplication.restoreOverrideCursor()
+        if gen == self._gen:                        # ignore a sort that a newer filter or click has replaced
+            self._apply(S, sqt, keep)
+
+    def _apply(self, V, sqt, keep):
+        win = self.win
         self.V = V
         self.HI = []
         hit = None
@@ -1650,9 +1688,23 @@ class MainWindow(QMainWindow):
         if running != self.run:
             self.run = running
             self.update_tabs()
-            if not running:
+            if not running and not self._feed:
                 self.poll_timer.stop()
         self.live.set_running(running, len(LT.P))
+        if self._feed and not running:
+            self.live.ls.setText(f'● MS/TP link (Discover) – {C.locale_int(len(LT.P))} frames')
+
+    _feed = False
+
+    def mstp_feed(self, on):
+        """While Discover is joined to an MS/TP trunk, its frames appear in the Live capture tab."""
+        self._feed = on
+        if on:
+            self.poll_timer.start()
+            self.toast('Joined the MS/TP trunk – every frame the PC sends and receives is shown in the Live capture tab')
+        elif not self.run:
+            self.poll_timer.stop()
+            self.poll()
 
     def _live_analysed(self, tab, F):
         self.analysing = False
@@ -1890,11 +1942,20 @@ class MainWindow(QMainWindow):
     def formats(self, v):
         """[(key, filter label, extension, maker)] for view v; maker returns str or bytes."""
         if v == 'p':
-            return [('html', 'Web page – exactly as shown (*.html)', 'html', self.html_packets),
-                    ('pcapng', 'Capture file – only the packets that match the filter (*.pcapng)', 'pcapng', lambda: C.pcapng(self.pk.V)),
-                    ('csv', 'Spreadsheet – the rows shown (*.csv)', 'csv', lambda: '﻿' + self.csv_packets())]
-        w = self.view(v)
-        return w.formats() if hasattr(w, 'formats') else []
+            fm = [('html', 'Web page – exactly as shown (*.html)', 'html', self.html_packets),
+                  ('pcapng', 'Capture file – only the packets that match the filter (*.pcapng)', 'pcapng', lambda: C.pcapng(self.pk.V)),
+                  ('csv', 'Spreadsheet – the rows shown (*.csv)', 'csv', lambda: '﻿' + self.csv_packets())]
+        else:
+            w = self.view(v)
+            fm = w.formats() if hasattr(w, 'formats') else []
+        # every spreadsheet export can also be saved as an Excel workbook
+        out = []
+        for f in fm:
+            out.append(f)
+            if f[2] == 'csv':
+                lab = f[1].replace('Spreadsheet', 'Excel workbook').replace('(*.csv)', '(*.xlsx)')
+                out.append(('xlsx', lab, 'xlsx', lambda mk=f[3], v=v: csv_to_xlsx(mk(), VTITLE.get(v, 'Sheet1'))))
+        return out
 
     def base_name(self):
         import re
