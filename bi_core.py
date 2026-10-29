@@ -668,7 +668,7 @@ class Pk:
     d = b''
     tree = None
     fl = bad = exp = mt = o = v = nak = dk = dn = sn = sa = key = adv = rb = nn = None
-    iam = whois = rq = rs = sig = wr = cov = rp = er = val = names = bm = note = wrx = None
+    iam = whois = rq = rs = sig = wr = cov = rp = er = val = names = bm = note = wrx = ob = None
 
 
 _PAD = b'\0' * 64
@@ -801,6 +801,7 @@ def npdu(d, L, o, r, tree):
         inv = d[i + 2]
         nm, ds = CSV.get(sv) or ['Service ' + str(sv), 'an unrecognised service']
         x = ob(k)
+        r.ob = x or None
         if x and sv in (12, 15):
             p = pr(k + 5)
             if p:
@@ -1205,6 +1206,11 @@ def _addrs(r):
     return ' '.join(x for x in (r.src, r.dst, r.key, r.dk, r.o) if x)
 
 
+def _anyof(field, vals, limit=10):
+    """'field == "a" || field == "b"' – the display filter for a finding's packets."""
+    return ' || '.join(f'{field} == "{v}"' for v in list(dict.fromkeys(vals))[:limit])
+
+
 def _fields(T0):
     def gw(r):
         return [r.o if r.sn is not None else None, r.dst if r.dn is not None else None]
@@ -1219,6 +1225,10 @@ def _fields(T0):
         'announcer': lambda r: r.o if r.adv is not None else None, 'write': lambda r: 1 if r.wr else 0,
         'command': lambda r: 1 if r.wr and r.wr['sev'] else 0, 'cov': lambda r: 1 if r.cov else 0,
         'error': lambda r: 1 if r.er else 0, 'bookmark': lambda r: 1 if r.bm else 0, 'note': lambda r: r.note or '',
+        'sender': lambda r: r.key or r.src, 'receiver': lambda r: r.dk or r.dst, 'service': lambda r: r.rs,
+        'object': lambda r: [r.ob, r.wr['obj'] if r.wr else None, r.cov['obj'] if r.cov else None],
+        'mstp.type': lambda r: MT.get(r.mt[0]) if r.mt else None, 'mstp.src': lambda r: r.mt[1] if r.mt else None,
+        'mstp.dst': lambda r: r.mt[2] if r.mt else None,
         'ip': lambda r: _IP_RE.findall(_addrs(r)),           # any IP in the packet, also behind a router
         'mac': lambda r: _MAC_RE.findall(_addrs(r))}         # any MS/TP MAC in the packet
     F.update({'ip.addr': F['addr'], 'ip.src': F['src'], 'ip.dst': F['dst'], 'bacnet.device': F['device'],
@@ -1548,6 +1558,17 @@ def _fix_why(w):
     return 'Check the requester and the device settings for this service.'
 
 
+def _pair_q(e):
+    """A repeated request: that poller asking that device about that object."""
+    sig = e.get('sig') or ''
+    obj = sig.split(': ', 1)[1].split(',')[0].replace(' …', '').strip() if ': ' in sig else ''
+    q = f'sender == "{e["from"]}" && receiver == "{e["to"]}"'
+    svc = sig.split(': ', 1)[0].strip()
+    if svc:
+        q += f' && service == "{svc}"'
+    return f'({q} && object == "{obj}")' if obj else f'({q})'
+
+
 def _median_sorted(a):
     return a[len(a) // 2] if a else 0
 
@@ -1712,7 +1733,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             if nk == 1:
                 out.append({'s': 'WARNING', 't': 'A BBMD is refusing requests',
                             'w': f'The BBMD at {r.src} answered "no" (code 0x{r.nak:x}) to a request from {r.dst}.',
-                            'ev': [f'{r.src} refused {r.dst}'],
+                            'ev': [f'{r.src} refused {r.dst}'], 'q': 'nak',
                             'y': 'A BBMD links separate IP subnets. When it refuses requests, devices on other subnets cannot register or be discovered, so they look offline.',
                             'f': [f'Open the BBMD settings on the device at {r.src}.',
                                   'Check the Broadcast Distribution Table (BDT): every BBMD must be listed with the correct IP address, port and subnet mask.',
@@ -1749,7 +1770,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     for did, ks in dev.items():
         if did > 4194302:
             out.append({'s': 'WARNING', 't': f'Unusable device ID {did}',
-                        'w': f'A device announced itself as device ID {did}, which is reserved.',
+                        'w': f'A device announced itself as device ID {did}, which is reserved.', 'q': f'device == {did}',
                         'ev': [f'Announced from {ad(k)}' for k in ks],
                         'y': '4194303 is the wildcard meaning "any device", so no real device can use it. Software cannot address a device that has it, which usually means the device was never configured.',
                         'f': ['Find the device at the address shown (by its IP address or MS/TP MAC).',
@@ -1801,7 +1822,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         if cc:
             out.append({'s': 'SERIOUS', 't': f'Two devices are using the same device ID ({did})',
                         'w': f'Device ID {did} is being announced by {len(l)} different addresses at the same time, so {len(l)} different physical devices are claiming it.',
-                        'ev': ev, 'sg': sg, 'id': did,
+                        'ev': ev, 'sg': sg, 'id': did, 'q': f'device == {did}',
                         'y': 'Every device must have its own device ID. When two share one, software cannot tell them apart: reads and writes can reach the wrong controller, point values jump between the two, and one of them may vanish from device lists.',
                         'f': ['Note the addresses under "Where". An address marked "via gateway" is a device on another network, behind that gateway.',
                               'Find each physical device. For an IP address, look it up in your router or switch (ARP or DHCP table) to get its hardware address and switch port. For an MS/TP address, check the address setting on the controllers on that trunk.',
@@ -1813,6 +1834,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         else:
             out.append({'s': 'WARNING', 't': f'Device {did} changed address during the capture',
                         'w': f'Device ID {did} was first seen at one address and later at another, but never at both at once.',
+                        'q': f'device == {did}',
                         'ev': ev,
                         'y': 'This is harmless if the device was replaced or re-addressed on purpose. If not, its address is not fixed, so other devices and your front-end software may lose contact with it each time it changes.',
                         'f': ['Compare the "active" times under Where: the old address should stop when the new one starts.',
@@ -1824,6 +1846,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         v = via.get(n, {})
         ad_ = adv.get(n, {})
         rs = list(dict.fromkeys(list(v) + list(ad_)))
+        nq = f'net == {n} || dnet == {n} || reach == {n}'
         if len(rs) < 2:
             continue
         ss = list(v.values())
@@ -1837,7 +1860,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             return f'Gateway {x} announced a route to this network, but none of its devices were seen'
         ev = [gdesc(x) for x in rs]
         if n == 0:
-            out.append({'s': 'NOTE', 't': 'Several gateways refer to network 0 (the local network)',
+            out.append({'s': 'NOTE', 't': 'Several gateways refer to network 0 (the local network)', 'q': nq,
                         'w': f'{len(rs)} gateways mention network 0. Network 0 is not a real network number: devices and routers '
                              'use it to mean "the local network", so many devices can point to it at once.',
                         'ev': ev,
@@ -1848,7 +1871,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             continue
         if dj:
             out.append({'s': 'SERIOUS' if all(len(a) > 1 for a in ss) else 'WARNING',
-                        't': f'Two different networks seem to share network number {n}',
+                        't': f'Two different networks seem to share network number {n}', 'q': nq,
                         'w': f'Several gateways say they lead to network {n}, but each one passes on a completely different set of devices. If it were one network reached by backup routers, they would all pass on the same devices.',
                         'ev': ev,
                         'y': 'A network number works like a street name. When two networks share one, routers cannot tell which one a message is for, so messages go to the wrong place and devices seem to appear and disappear.',
@@ -1858,13 +1881,13 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                               'If a router "learned" its number from another router, set the number manually (configured) instead.',
                               'Restart the affected routers, or wait for them to refresh, and capture again.']})
         elif len(ss) > 1:
-            out.append({'s': 'NOTE', 't': f'Network {n} can be reached through more than one gateway',
+            out.append({'s': 'NOTE', 't': f'Network {n} can be reached through more than one gateway', 'q': nq,
                         'w': f'The same devices on network {n} were passed on by more than one gateway.', 'ev': ev,
                         'y': 'This looks like a deliberate backup path (two routers doing the same job). It is only a problem if you expected a single router, or if it creates a loop.',
                         'f': ['If you installed backup routers, no action is needed.',
                               'If not, find out why two gateways connect to the same network and remove the extra one.']})
         else:
-            out.append({'s': 'WARNING', 't': f'Network {n} is announced by several gateways – check it is not a duplicate',
+            out.append({'s': 'WARNING', 't': f'Network {n} is announced by several gateways – check it is not a duplicate', 'q': nq,
                         'w': f'{len(rs)} gateways announce a route to network {n}. That is normal for backup routers, but it is also what a duplicated network number looks like. There was not enough device traffic to tell which.',
                         'ev': ev, 'y': 'If it is a duplicate, messages may reach the wrong network.',
                         'f': ['Open each gateway listed under Where and check which network sits behind it.',
@@ -1877,7 +1900,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         ms = k.startswith('MS/TP')
         nt = k.startswith('network')
         Ls = ', '.join('device ' + str(i) for i in s_)
-        out.append({'s': 'WARNING' if ms or nt else 'NOTE', 't': f'One address uses {len(s_)} different device IDs ({k})',
+        out.append({'s': 'WARNING' if ms or nt else 'NOTE', 't': f'One address uses {len(s_)} different device IDs ({k})', 'q': f'iam && sender == "{k}"',
                     'w': f'{ad(k)} announced {Ls}. One address should hold only one device.',
                     'ev': [f"device {i} announced {dv[f'{i}|{k}']['n']}× from {ad(k)}" for i in s_],
                     'y': ('Two devices with the same MS/TP address fight over the token and answer each other’s messages. That causes garbled frames, lost messages and devices that drop in and out.' if ms else
@@ -1894,7 +1917,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                           ['If this address is a gateway, supervisor or simulator, no action is needed.',
                            'Otherwise treat it like a duplicate device ID: find the device by its IP address and make sure each device has its own device ID.'])})
     if mb >= 3 and mb / mt >= .005:
-        out.append({'s': 'SERIOUS' if mb / mt >= .1 else 'WARNING', 't': 'The MS/TP wiring is producing damaged messages',
+        out.append({'s': 'SERIOUS' if mb / mt >= .1 else 'WARNING', 't': 'The MS/TP wiring is producing damaged messages', 'q': 'bad',
                     'w': f'{mb} of {mt} MS/TP frames ({tofixed(100 * mb / mt, 1)}%) failed their CRC error check.',
                     'ev': [f'{mb} damaged and {mt - mb} good MS/TP frames'],
                     'y': 'A damaged frame is a lost message. You will see slow updates, retries, and devices that drop offline and come back.',
@@ -1916,7 +1939,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     dead = [m for m in sorted(tk) if m not in seen_src and tk[m] >= 3]
     for m in dead:
         frm = [f'MAC {s} passed it {tok_to[s][m]}×' for s in sorted(tok_to) if tok_to[s].get(m)]
-        out.append({'s': 'WARNING', 't': f'The token is being handed to MAC {m}, but nothing answers',
+        out.append({'s': 'WARNING', 't': f'The token is being handed to MAC {m}, but nothing answers', 'q': f'mstp.type == "Token" && mstp.dst == {m}',
                     'w': f'MAC {m} was offered the MS/TP token {tk[m]} times but never sent a single frame itself, so there is probably no working device at that address.',
                     'ev': frm,
                     'y': 'Every time the token goes to an address with nothing behind it, the trunk waits for a timeout before moving on. That wastes bandwidth and makes every device on the trunk slower to talk.',
@@ -1928,7 +1951,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         e = sorted([(m, c) for m, c in sorted(tok_to[s].items()) if m not in dead], key=lambda x: -x[1])
         tot = sum(c for _, c in e)
         if len(e) > 1 and e[1][1] >= 5 and e[1][1] / tot >= .1:
-            out.append({'s': 'WARNING', 't': f'The token route around MAC {s} keeps changing',
+            out.append({'s': 'WARNING', 't': f'The token route around MAC {s} keeps changing', 'q': f'mstp.type == "Token" && mstp.src == {s}',
                         'w': f"MAC {s} passes the token to {len(e)} different devices ({', '.join(f'MAC {m} {c}×' for m, c in e)}). In a healthy trunk each master always passes the token to the same next master.",
                         'ev': [f'MAC {s} → MAC {m}: {c} times' for m, c in e],
                         'y': 'A changing token route means masters are repeatedly dropping out of and rejoining the ring. Devices that keep losing the token answer slowly or not at all, and values go stale.',
@@ -1962,7 +1985,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         return 'device ' + ', '.join(map(str, e['ids'])) if e['ids'] else e['key']
     sw_ = [e for e in sl if e['slow']]
     if sw_:
-        out.append({'s': 'WARNING', 't': f'{nmv2(sw_[0])} is slow to answer requests' if len(sw_) == 1 else f'{len(sw_)} devices are slow to answer requests',
+        out.append({'s': 'WARNING', 'q': _anyof('host', [e['key'] for e in sw_]), 't': f'{nmv2(sw_[0])} is slow to answer requests' if len(sw_) == 1 else f'{len(sw_)} devices are slow to answer requests',
                     'w': 'These devices took a long time to answer: ' + '; '.join(f"{nmv2(e)} (typical {fmt_ms(e['med'])}, worst {fmt_ms(e['max'])})" for e in sw_[:5]) + '.',
                     'ev': [f"{e['key']} – typical {fmt_ms(e['med'])}, slowest 5% took {fmt_ms(e['p95'])}, {e['n']} answered" for e in sw_],
                     'y': 'Most controllers answer in well under half a second. A device that takes seconds is overloaded, on a congested or noisy network, or being asked for too much at once. Front-end screens feel sluggish and requests start timing out.',
@@ -1973,7 +1996,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                           'Capture again after the change and compare the two captures on the Compare tab.']})
     sm_ = [e for e in sl if e['silent']]
     if sm_:
-        out.append({'s': 'WARNING', 't': f'{nmv2(sm_[0])} often does not answer' if len(sm_) == 1 else f'{len(sm_)} devices often do not answer',
+        out.append({'s': 'WARNING', 'q': _anyof('receiver', [e['key'] for e in sm_]), 't': f'{nmv2(sm_[0])} often does not answer' if len(sm_) == 1 else f'{len(sm_)} devices often do not answer',
                     'w': 'Requests sent to these devices went unanswered: ' + '; '.join(f"{nmv2(e)} ({e['miss']} of {e['n'] + e['miss']} unanswered)" for e in sm_[:5]) + '.',
                     'ev': [f"{e['key']} – {e['miss']} of {e['n'] + e['miss']} requests got no answer" for e in sm_],
                     'y': 'Unanswered requests mean lost messages or a device that is offline, overloaded or unable to reply. Software retries and waits, which makes everything slower.',
@@ -1987,7 +2010,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         fl[x] = max(fl.get(x, 0), c)
     for x, c in fl.items():
         if c >= 20:
-            out.append({'s': 'WARNING', 't': 'A device is flooding the network with Who-Is requests',
+            out.append({'s': 'WARNING', 't': 'A device is flooding the network with Who-Is requests', 'q': f'whois && (sender == "{x}" || src == "{x}")',
                         'w': f'{x} sent up to {c} "who is out there?" broadcasts in one second.',
                         'ev': [f'{x} – peak {c} per second'],
                         'y': 'Every device must answer each unrestricted Who-Is, so a flood can clog the network (especially slow MS/TP trunks) and make everything sluggish.',
@@ -2014,6 +2037,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             continue
         nf += 1
         out.append({'s': 'SERIOUS' if trn >= 6 else 'WARNING', 't': f"Two sources keep writing the same point ({g['obj']}, {g['prop']})",
+                    'q': f'write && receiver == "{g["to"]}" && object == "{g["obj"]}"',
                     'w': f"{' and '.join(name_of(x) for x in g['w'])} are both writing {g['obj']} {g['prop']} on {name_of(g['to'])}, and the value flips between them {trn} times.",
                     'ev': [f"{name_of(f)} wrote it {x['n']}× (values: {', '.join(list(x['v'])[:4])})" for f, x in g['w'].items()],
                     'y': 'When two controllers or front-end systems command the same point, they undo each other: the equipment hunts, runs when it should not, or the point never settles where you set it. It is one of the most common causes of "it keeps changing back".',
@@ -2031,6 +2055,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     if fq:
         e0 = fq[0]
         out.append({'s': 'WARNING', 't': 'A point is being written very often' if len(fq) == 1 else f'{len(fq)} points are being written very often',
+                    'q': ' || '.join(f'(write && sender == "{e["f"]}" && object == "{e["g"]["obj"]}")' for e in fq[:6]),
                     'w': f"{name_of(e0['f'])} wrote {e0['g']['obj']} {e0['g']['prop']} on {name_of(e0['g']['to'])} {e0['x']['n']} times, about every {tofixed(e0['iv'], 1)} seconds.",
                     'ev': [f"{name_of(e['f'])} → {e['g']['obj']} {e['g']['prop']} on {name_of(e['g']['to'])}: {e['x']['n']}×, every {tofixed(e['iv'], 1)} s" for e in fq[:8]],
                     'y': 'Writing the same value over and over wastes network time, and if the property is stored in flash memory (setpoints, configuration, schedules) it can wear the memory out. It usually means a program loops or a front-end "keeps the value pushed".',
@@ -2041,7 +2066,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     cm = [w for w in wrs if w['sev'] >= 1]
     if cm:
         bad = any('DISABLE' in w['val'] for w in cm)
-        out.append({'s': 'SERIOUS' if bad else 'NOTE', 't': f"{len(cm)} restart, communication or object command{'' if len(cm) == 1 else 's'} seen",
+        out.append({'s': 'SERIOUS' if bad else 'NOTE', 't': f"{len(cm)} restart, communication or object command{'' if len(cm) == 1 else 's'} seen", 'q': 'command',
                     'w': 'These commands change how a device behaves: ' + '; '.join(f"{w['svc']} ({w['val']}) sent to {name_of(w['to'])}" for w in cm[:3]) + ('; …' if len(cm) > 3 else '') + '.',
                     'ev': [f"{fT(w['t'])}: {name_of(w['from'])} → {name_of(w['to'])}: {w['svc']}{' ' + w['obj'] if w['obj'] and w['obj'] != 'device' else ''} – {w['val']}{' (' + w['res'] + ')' if w['res'] else ''}" for w in cm[:12]],
                     'y': 'Restarting a controller drops its control for a while, and "disable communication" makes a device go silent so it looks offline. These are normal during commissioning and updates, but unexpected ones are a common reason equipment seems to misbehave.',
@@ -2056,7 +2081,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             k = w['to'] + '|' + w['res']
             g[k] = g.get(k, 0) + 1
         top3 = sorted(g.items(), key=lambda x: -x[1])[:3]
-        out.append({'s': 'WARNING', 't': f"{len(bw)} write{' was' if len(bw) == 1 else 's were'} refused",
+        out.append({'s': 'WARNING', 't': f"{len(bw)} write{' was' if len(bw) == 1 else 's were'} refused", 'q': 'error && info contains "Write"',
                     'w': f"Devices answered \"no\" to {len(bw)} write request{'' if len(bw) == 1 else 's'}. Most common: " + '; '.join(f"{name_of(k.split('|')[0])} – {k.split('|')[1]} ({n}×)" for k, n in top3) + '.',
                     'ev': [f"{fT(w['t'])}: {name_of(w['from'])} tried {w['obj']} {w['prop']} = {w['val']} on {name_of(w['to'])} → {w['res']}" for w in bw[:10]],
                     'y': 'The change did not happen. A front-end shows the new value as sent, but the device keeps the old one, so the screen and the equipment disagree.',
@@ -2068,7 +2093,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     tops = sorted(tf.items(), key=lambda x: -x[1]['n'])
     if tot >= 500 and len(tops) >= 3 and tops[0][1]['n'] / tot >= .5:
         allb = max(1, sum(r.len for r in P))
-        out.append({'s': 'NOTE', 't': f"{name_of(tops[0][0])} sends {jsround(100 * tops[0][1]['n'] / tot)}% of all traffic",
+        out.append({'s': 'NOTE', 't': f"{name_of(tops[0][0])} sends {jsround(100 * tops[0][1]['n'] / tot)}% of all traffic", 'q': f'sender == "{tops[0][0]}"',
                     'w': f"{name_of(tops[0][0])} sent {locale_int(tops[0][1]['n'])} of {locale_int(tot)} packets ({jsround(100 * tops[0][1]['b'] / allb)}% of the bytes).",
                     'ev': [f"{name_of(k)}: {locale_int(e['n'])} packets, {locale_int(e['rq'])} requests, {locale_int(e['bc'])} broadcasts" for k, e in tops[:5]],
                     'y': 'One busy address is normal for a front-end or supervisor that polls many devices. If it is a controller or a gateway, it may be misbehaving or overloaded.',
@@ -2083,6 +2108,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     if prs:
         p0 = prs[0]
         out.append({'s': 'WARNING' if p0['iv'] <= .2 else 'NOTE', 't': 'A request is repeated very often' if len(prs) == 1 else f'{len(prs)} requests are repeated very often',
+                    'q': ' || '.join(_pair_q(e) for e in prs[:6]),
                     'w': f"{name_of(p0['from'])} asks {name_of(p0['to'])} for the same thing ({p0['sig']}) about every {tofixed(p0['iv'], 2)} seconds, {locale_int(p0['n'])} times.",
                     'ev': [f"{name_of(e['from'])} → {name_of(e['to'])}: {e['sig']}, every {tofixed(e['iv'], 2)} s ({locale_int(e['n'])}×)" for e in prs[:8]],
                     'y': 'Fast polling of the same point keeps the network and the controller busy. On MS/TP, a few fast pollers are enough to make the whole trunk slow.',
@@ -2098,6 +2124,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     if cv:
         c0 = cv[0]
         out.append({'s': 'WARNING', 't': 'A point is sending a flood of change notifications' if len(cv) == 1 else f'{len(cv)} points are sending floods of change notifications',
+                    'q': ' || '.join(f'(cov && sender == "{e["from"]}" && object == "{e["obj"]}")' for e in cv[:6]),
                     'w': f"{name_of(c0['from'])} sent {locale_int(c0['n'])} change-of-value (COV) notifications for {c0['obj']}, about {tofixed(c0['rate'], 1)} per second.",
                     'ev': [f"{name_of(e['from'])}: {e['obj']} – {locale_int(e['n'])}× ({tofixed(e['rate'], 1)}/s)" for e in cv[:8]],
                     'y': 'COV is meant to send a message only when a value changes by a meaningful amount. A noisy sensor with a tiny COV increment turns into a constant stream that clogs the network and the subscriber.',
@@ -2109,6 +2136,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     big = [e for e in out.er if e['n'] >= 5]
     if big:
         out.append({'s': 'WARNING', 't': f"{name_of(big[0]['who'])} keeps refusing requests" if len(big) == 1 else f'{len(big)} devices keep refusing or failing requests',
+                    'q': 'error && (' + _anyof('sender', [e['who'] for e in big]) + ')',
                     'w': '; '.join(f"{name_of(e['who'])}: {e['why']} ({e['n']}×)" for e in big[:3]) + ('; …' if len(big) > 3 else '') + '.',
                     'ev': [f"{name_of(e['who'])} – {e['why']}, {e['n']}× (while handling {', '.join(map(str, e['svc']))})" for e in big[:10]],
                     'y': 'Every refused request is a wasted round trip, and the software on the other side often retries or shows missing data. Repeated refusals point to a setup problem rather than bad luck.',
@@ -2156,7 +2184,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     for t in trk:
         nm = f"MS/TP trunk (capture interface {t['ifc'] + 1})" if multi else 'MS/TP trunk'
         if t['pfmMax'] > t['hi'] and t['waste'] >= 10 and t['pfmTotal'] and t['waste'] / t['pfmTotal'] >= .2 and t['n'] >= 300:
-            out.append({'s': 'NOTE', 't': f'Max Master on the {nm} looks higher than needed',
+            out.append({'s': 'NOTE', 't': f'Max Master on the {nm} looks higher than needed', 'q': f'mstp.type == "Poll-For-Master" && mstp.dst > {t["hi"]}',
                         'w': f"The highest working master on this trunk is MAC {t['hi']}, but masters keep polling addresses up to MAC {t['pfmMax']} ({t['waste']} wasted polls, {jsround(100 * t['waste'] / t['pfmTotal'])}% of all polling).",
                         'ev': [f"Highest master seen: MAC {t['hi']}", f"Highest address polled: MAC {t['pfmMax']}"],
                         'y': 'Each master has a "Max Master" setting that tells it how far up the address range to look for new masters. Set higher than necessary, every cycle wastes time polling addresses where nothing exists.',
@@ -2164,7 +2192,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                               'Do this on all masters: they only poll as far as their own setting.',
                               'Leave a little headroom only if you will add devices soon.']})
         if t['rot'] >= 1 and len(t['masters']) >= 2:
-            out.append({'s': 'WARNING', 't': f'The token on the {nm} is slow to go round',
+            out.append({'s': 'WARNING', 't': f'The token on the {nm} is slow to go round', 'q': 'mstp.type == "Token"',
                         'w': f"The token takes about {tofixed(t['rot'], 2)} seconds to complete a lap between {len(t['masters'])} masters.",
                         'ev': [f"MAC {m['mac']} holds the token {jsround(m['hold'] * 1000)} ms on average (longest {jsround(m['holdMax'] * 1000)} ms)"
                                for m in sorted(t['masters'], key=lambda m: -m['hold'])[:4]],
@@ -2178,7 +2206,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         if o['est'] and o['est'] > 0 and o['conf']:
             u = util(o, o['est'], sp['dur'])
             if u['avg'] >= .5:
-                out.append({'s': 'WARNING', 't': f"The {o['name']} is about {jsround(u['avg'] * 100)}% full",
+                out.append({'s': 'WARNING', 't': f"The {o['name']} is about {jsround(u['avg'] * 100)}% full", 'q': 'proto == "MS/TP"',
                             'w': f"At the estimated {o['est']} baud, the trunk was busy about {jsround(u['avg'] * 100)}% of the time on average (peak {jsround(min(1, u['peak']) * 100)}% in one second).",
                             'ev': [f"{locale_int(o['n'])} frames; {o['est']} baud estimated from the timing between frames"],
                             'y': 'MS/TP shares one wire between all devices, and only the device holding the token can talk. When the trunk is this busy, replies are delayed, tokens take longer to go round, and devices start to time out.',

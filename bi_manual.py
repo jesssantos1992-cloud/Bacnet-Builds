@@ -259,6 +259,12 @@ Right-click a saved button to remove it.</p>
 <tr><td><code>ip</code></td><td>an IP address anywhere in the packet – sender, receiver or router, with or without the port:
 <code>ip == "10.0.0.5"</code></td></tr>
 <tr><td><code>mac</code></td><td>an MS/TP MAC anywhere in the packet: <code>mac == 5</code></td></tr>
+<tr><td><code>sender</code>, <code>receiver</code></td><td>the device that sent / should receive the message, even
+behind a router: <code>sender == "network 2400, MAC 7"</code></td></tr>
+<tr><td><code>service</code></td><td>the request: <code>service == "Read Property"</code></td></tr>
+<tr><td><code>object</code></td><td>the object a request, write or COV is about: <code>object == "analog-input 1"</code></td></tr>
+<tr><td><code>mstp.type</code>, <code>mstp.src</code>, <code>mstp.dst</code></td><td>MS/TP frame type and MACs:
+<code>mstp.type == "Token" &amp;&amp; mstp.dst == 12</code></td></tr>
 <tr><td><code>from</code>, <code>to</code></td><td>the logical sender / receiver (the device itself, even behind a router)</td></tr>
 <tr><td><code>proto</code></td><td><code>"BACnet/IP"</code> or <code>"MS/TP"</code></td></tr>
 <tr><td><code>info</code></td><td>the Info text</td></tr>
@@ -291,6 +297,11 @@ problems and explains each one:</p>
 <li><b>Why it matters</b> – what it does to the building.</li>
 <li><b>How to troubleshoot</b> – numbered steps to fix it.</li>
 </ul>
+<p><b>Show the packets behind this finding ›</b> under each title opens the Packets page filtered to exactly the
+messages that caused it – for example only the COV notifications that one device sent for the flooding point, the
+Who-Is broadcasts from the flooding address, the token passes to a dead MAC, the I-Am announcements of a duplicate
+device ID, or the refused writes. The filter appears in the filter box, so you can see what was used and change it;
+press {k('Esc')} to see every packet again.</p>
 <p><b>Click any highlighted address</b> – an IP address, an MS/TP MAC, a network number or a device ID – to jump to
 the Packets page showing only the packets that involve it. This works everywhere addresses are highlighted:
 Findings, Devices, Compare and the other tables. The pointer turns into a hand over them. (In the packet list itself

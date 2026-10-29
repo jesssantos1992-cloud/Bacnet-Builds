@@ -1,3 +1,2 @@
-- Packet details now show the full contents of every BACnet message, like Wireshark: invoke ID, max response size, the service and every parameter – objects, properties, values with units and states, priorities, time stamps, errors – nested as deep as the message goes. COV notifications show their changed values in the Info column too.
-- Click any highlighted IP address, MS/TP MAC, network or device ID (in Findings, Devices, Compare and the other tables) to see just the packets that involve it. New display filters: ip == "10.0.0.5" and mac == 5.
-- Hover over a line in the packet details that is cut off to read all of it.
+- Findings: every problem now has a "Show the packets behind this finding" link that opens the Packets page filtered to exactly the messages that caused it - for example only the COV notifications one device sent for the flooding point, or the token passes to a dead MS/TP MAC.
+- New display filters: sender, receiver, service, object, mstp.type, mstp.src and mstp.dst (see Help > Display filter reference).

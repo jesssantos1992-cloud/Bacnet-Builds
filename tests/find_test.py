@@ -68,6 +68,31 @@ links = html.count('href="bi:')
 print('links in Findings:', links)
 if not links:
     fails.append('no clickable addresses in Findings')
+
+# every finding links to the packets behind it, and that filter finds them
+def check_findings(label):
+    for f in w.FD:
+        q = f.get('q')
+        if not q:
+            fails.append(f'finding without packets link: {f["t"]}')
+            continue
+        try:
+            n = sum(map(C.compile_filter(q, w.T0), w.P))
+        except C.FilterError as e:
+            fails.append(f'bad filter for "{f["t"]}": {q} ({e})')
+            continue
+        print(f'  [{label}] {f["t"][:60]:60} -> {n:6} packets   {q[:90]}')
+        if not n:
+            fails.append(f'no packets behind finding "{f["t"]}" ({q})')
+
+
+check_findings(os.path.basename(sys.argv[1]))
+if w.FD:
+    w.find_link(bi_common.find_href('q', w.FD[0]['q']))
+    pump(0.3)
+    print('Show the packets:', w.cur_view, repr(w.qbox.text()[:80]), '|', w.toaster.lab.text())
+    if w.cur_view != 'p' or not w.pk.V:
+        fails.append('the finding link did not open its packets')
 dv = [d for d in (w.FD.dv or []) if d.get('key')]
 tests = []
 ips = sorted({k.split(', ')[-1] for k in (d['key'] for d in dv) if k[0].isdigit()})
@@ -128,6 +153,13 @@ if found:
     print(f'Devices tree cell {it.text(col)!r}: link {href!r} -> view {w.cur_view}, {len(w.pk.V)} packets')
     if not href or w.cur_view != 'p':
         fails.append('clicking an address in the Devices tree did not open its packets')
+for extra in sys.argv[2:]:                     # the other captures' findings too
+    w.open_path(extra)
+    end = time.time() + 120
+    while time.time() < end and not (w.ac and w.ac.n == os.path.basename(extra) and w.ac.P and not w.ac.busy):
+        pump(0.2)
+    pump(0.5)
+    check_findings(os.path.basename(extra))
 w.close()
 pump(0.2)
 print('exceptions:', ERR + fails)

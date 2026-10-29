@@ -1615,6 +1615,11 @@ class MainWindow(QMainWindow):
             f, what = f'mac == {n}', f'MAC {n}'
         elif kind == 'net':
             f, what = f'net == {n} || dnet == {n}', f'network {n}'
+        elif kind == 'q':                       # 'Show the packets behind this finding'
+            self.go_packets(val)
+            n = len(self.pk.V)
+            return self.toast(f'{C.locale_int(n)} packet{"" if n == 1 else "s"} behind this finding – '
+                              'clear the filter (Esc) to see everything again' if n else 'No packets match this finding')
         elif kind == 'id':
             keys = sorted(k for k, ids in C.kid_map(self.FD).items() if int(n) in ids and k)
             f = ' || '.join([f'host == "{k}"' for k in keys] + [f'device == {n}'])

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 
 import bi_core as C
 import bi_ui as U
-from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, link_finds, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
+from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, find_href, link_finds, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
 
 VN = C.VN
@@ -121,6 +121,12 @@ def findings_html(win, F, for_export=False):
         return f' &nbsp;<span style="color:{col};font-weight:600">● {cnt[k]} {l}</span>'
     h = [f'<p style="font-size:15pt;margin:0 0 16px 0"><b>{head}</b>{pill("SERIOUS", "serious")}{pill("WARNING", "warnings")}{pill("NOTE", "notes")}</p>']
     lb = lambda t: f'<p style="margin:12px 0 4px 0;font-size:8pt;color:{c["mu"]}"><b>{t}</b></p>'  # noqa: E731
+
+    def show(f):                                  # opens Packets filtered to exactly what this finding is about
+        if for_export or not f.get('q'):
+            return ''
+        return (f'<p style="margin:8px 0 0 0"><a href="{find_href("q", f["q"])}" style="color:{c["ac"]};'
+                f'text-decoration:none;font-weight:600">Show the packets behind this finding ›</a></p>')
     for f in F:
         col = {'SERIOUS': c['se'], 'WARNING': c['wa'], 'NOTE': c['no']}[f['s']]
         ev = ''
@@ -129,7 +135,7 @@ def findings_html(win, F, for_export=False):
         steps = '<ol style="margin-top:0">' + ''.join(f'<li style="margin:4px 0">{hl(x)}</li>' for x in f['f']) + '</ol>'
         body = (f'<p style="margin:0"><span style="color:{col};font-size:8pt;font-weight:700">{f["s"]}</span> &nbsp; '
                 f'<span style="font-size:12pt;font-weight:600">{hl(f["t"])}</span></p>'
-                f'{lb("WHAT WE FOUND")}<p style="margin:0">{hl(f["w"])}</p>{ev}'
+                f'{show(f)}{lb("WHAT WE FOUND")}<p style="margin:0">{hl(f["w"])}</p>{ev}'
                 f'{lb("WHY IT MATTERS")}<p style="margin:0">{hl(f["y"])}</p>{lb("HOW TO TROUBLESHOOT")}{steps}')
         h.append(f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:18px"><tr>'
                  f'<td width="5" style="background-color:{col}"></td>'
