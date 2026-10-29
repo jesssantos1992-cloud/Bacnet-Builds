@@ -8,7 +8,7 @@ import html
 import re
 import time
 
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPainter, QPalette, QPen, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QLayout,
                                QSizePolicy,
@@ -94,11 +94,13 @@ class Labels:
 
     def hl(self, x, for_export=False, names=True):
         """HTML: colour IP addresses, MS/TP MACs, networks and device IDs (as on the original pages).
-        names=False when the text already carries the “name” after each number."""
+        names=False when the text already carries the “name” after each number. On screen (not for_export)
+        each one is also a link that shows its packets (see find_href)."""
         c = colors() if not for_export else colors_light()
         out = []
         last = 0
         s = str(x)
+        prev_net = None                                # 'network 5, MAC 3' is one address behind a router
         for m in self.HRE.finditer(s):
             out.append(esc(s[last:m.start()]))
             t = esc(m.group(0))
@@ -106,7 +108,15 @@ class Labels:
                 out.append(f'<b style="color:{c["ac"]}">{t}</b>')
             else:
                 kind = 'ip' if m.group(1) else 'mac' if m.group(2) else 'net' if m.group(3) else 'id'
-                out.append(f'<span style="background-color:{c[kind]};font-family:{MONO}">&nbsp;{t}&nbsp;</span>')
+                chip = f'<span style="background-color:{c[kind]};color:{c["fg"]};font-family:{MONO}">&nbsp;{t}&nbsp;</span>'
+                if for_export:
+                    out.append(chip)
+                else:
+                    val = m.group(0)
+                    if kind in ('ip', 'mac') and prev_net and s[prev_net[1]:m.start()] == ', ':
+                        kind, val = 'host', f"{prev_net[0]}, {val.replace('MS/TP ', '')}"
+                    out.append(f'<a href="{find_href(kind, val)}" style="text-decoration:none">{chip}</a>')
+                prev_net = (m.group(0).replace('net ', 'network ').replace('Network', 'network'), m.end()) if m.group(3) else None
                 num = re.search(r'\d+', m.group(0)).group(0) if kind in ('net', 'id') else None
                 lab = (self.n(num) if kind == 'net' else self.d(num) if kind == 'id' else '') if names else ''
                 if lab:
@@ -117,6 +127,31 @@ class Labels:
 
 
 LABELS = None          # set by the main window; used by HighlightDelegate
+FIND = None            # set by the main window: FIND(href) shows the packets for a clicked address
+
+
+def _href_label(href):
+    from urllib.parse import unquote
+    kind, _, val = unquote(href[3:]).partition('|')
+    n = re.search(r'\d+', val)
+    if kind in ('id', 'net') and n:
+        return ('device ' if kind == 'id' else 'network ') + n.group(0)
+    return val
+
+
+def find_href(kind, value):
+    """Link target for a highlighted address: bi:<kind>|<value> (kind: ip, mac, net, id or host)."""
+    from urllib.parse import quote
+    return 'bi:' + quote(f'{kind}|{value}')
+
+
+def link_finds(tb):
+    """Let a QTextBrowser's highlighted addresses open their packets (other links open in the web browser)."""
+    from PySide6.QtGui import QDesktopServices
+    tb.setOpenLinks(False)
+    tb.anchorClicked.connect(lambda u: FIND(u.toString()) if u.toString().startswith('bi:') and FIND
+                             else QDesktopServices.openUrl(u))
+    tb.setToolTip('')
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -134,8 +169,45 @@ class RowDelegate(QStyledItemDelegate):
 
 
 class HighlightDelegate(QStyledItemDelegate):
-    """Draws a table / tree cell with IP addresses, MACs, networks and device IDs highlighted."""
+    """Draws a table / tree cell with IP addresses, MACs, networks and device IDs highlighted.
+    Clicking a highlighted address shows its packets (unless clickable=False, as in the packet list itself)."""
     row_h = None
+
+    def __init__(self, parent=None, clickable=True):
+        super().__init__(parent)
+        self.clickable = clickable
+        if clickable and hasattr(parent, 'viewport'):
+            parent.viewport().setMouseTracking(True)
+
+    def href_at(self, opt, ix, pos):
+        text = ix.data(Qt.ItemDataRole.DisplayRole)
+        if not text or LABELS is None or not Labels.HRE.search(str(text)):
+            return ''
+        o = QStyleOptionViewItem(opt)
+        self.initStyleOption(o, ix)
+        w = o.widget
+        st = w.style() if w else QApplication.style()
+        r = st.subElementRect(QStyle.SubElement.SE_ItemViewItemText, o, w)
+        doc = self._doc(str(text), o.font, QColor('black'))
+        x = pos.x() - r.left() - 1
+        y = pos.y() - r.top() - max(0, (r.height() - doc.size().height()) / 2)
+        return doc.documentLayout().anchorAt(QPointF(x, y))
+
+    def editorEvent(self, ev, model, opt, ix):
+        t = ev.type()
+        if self.clickable and FIND and t in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease):
+            href = self.href_at(opt, ix, ev.position())
+            vp = opt.widget.viewport() if opt.widget is not None and hasattr(opt.widget, 'viewport') else None
+            if t == QEvent.Type.MouseMove and vp is not None:
+                if href:
+                    vp.setCursor(Qt.CursorShape.PointingHandCursor)
+                    vp.setToolTip('Click to show the packets for ' + _href_label(href))
+                else:
+                    vp.unsetCursor()
+                    vp.setToolTip('')
+            elif href.startswith('bi:') and ev.button() == Qt.MouseButton.LeftButton:
+                QTimer.singleShot(0, lambda: FIND(href))
+        return super().editorEvent(ev, model, opt, ix)
 
     def paint(self, p, opt, ix):
         o = QStyleOptionViewItem(opt)

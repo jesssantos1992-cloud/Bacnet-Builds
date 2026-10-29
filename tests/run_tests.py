@@ -52,6 +52,7 @@ def main():
              ('galactic cursor', [py, 'cursor_test.py'], False),
              ('smoke: every view and export', [py, 'smoke.py'] + caps, True),
              ('QA: every view, both themes, two sizes', [py, 'qa.py'] + caps, True),
+             ('packet details decode and click-to-find', [py, 'find_test.py'] + caps, True),
              ('alarms, properties, Excel, sorting', [py, 'features_test.py'] + (caps[:1] + caps[-1:] if caps else []), True)]
     env = dict(os.environ, PYTHONIOENCODING='utf-8')
     os.makedirs(os.path.join(HERE, 'out', 'shots'), exist_ok=True)

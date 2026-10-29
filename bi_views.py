@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 
 import bi_core as C
 import bi_ui as U
-from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
+from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, link_finds, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
 
 VN = C.VN
@@ -147,6 +147,7 @@ class FindingsView(BaseView):
         self.tb = QTextBrowser()
         self.tb.setFrameShape(QFrame.Shape.NoFrame)
         self.tb.document().setDocumentMargin(22)
+        link_finds(self.tb)                       # click an address to see its packets
         v.addWidget(self.tb)
         self._last = None
 
@@ -1618,6 +1619,7 @@ class CompareView(BaseView):
         v.addWidget(self.ctl)
         self.tb = QTextBrowser()
         self.tb.setFrameShape(QFrame.Shape.NoFrame)
+        link_finds(self.tb)
         v.addWidget(self.tb, 1)
         self.A = self.B = None
         self.R = None

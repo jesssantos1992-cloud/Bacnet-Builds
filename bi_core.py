@@ -776,8 +776,6 @@ def npdu(d, L, o, r, tree):
                 r.iam = {'inst': oid % 4194304, 'vendor': vs[2]}
                 s = f"I-Am: device {r.iam['inst']} announces itself"
                 e = 'A device announcing its device ID, address and manufacturer. Sent at startup and in answer to a Who-Is.'
-                if tree is not None:
-                    tree.append([1, f"Device ID: {r.iam['inst']}, manufacturer ID: {vs[2]}, max message size: {vs[0]}"])
         elif v == 8:
             r.whois = 1
             lo = hi = None
@@ -794,6 +792,9 @@ def npdu(d, L, o, r, tree):
                 covdec(d, i + 2, r)
             except IndexError:
                 pass
+            cv = _cov_text(d, L, i)
+            if cv:
+                s = f'{nm}: {cv}'
     elif t == 0:
         sv = d[i + 5] if seg else d[i + 3]
         k = i + 6 if seg else i + 4
@@ -818,6 +819,7 @@ def npdu(d, L, o, r, tree):
                 covdec(d, k, r)
             except IndexError:
                 pass
+            x = _cov_text(d, L, i) or x
         s = f"{nm} request{': ' + x if x else ''} (#{inv})"
         e = f'Request #{inv}: {ds}. The device should answer with a response marked #{inv}.'
     elif 2 <= t <= 7:
@@ -842,8 +844,6 @@ def npdu(d, L, o, r, tree):
                     if g:
                         s += ': ' + g
                         r.val = g
-                        if tree is not None:
-                            tree.append([1, 'Value: ' + g])
                 except IndexError:
                     pass
             else:
@@ -867,8 +867,18 @@ def npdu(d, L, o, r, tree):
             r.er = {'k': 'abort', 'txt': why}
     r.exp = e
     if tree is not None:
-        tree += [[1, s], [1, 'Meaning: ' + e]]
+        import bi_svc
+        tree += [[1, s], [1, 'Meaning: ' + e]] + bi_svc.apdu_rows(d, L, i)
     return s
+
+
+def _cov_text(d, L, i):
+    """The changed values of a COV notification, for the Info column."""
+    try:
+        import bi_svc
+        return bi_svc.cov_summary(d, L, i)
+    except Exception:
+        return ''
 
 
 def v6s(a) -> str:
@@ -1187,6 +1197,14 @@ class FilterError(Exception):
     pass
 
 
+_IP_RE = re.compile(r'(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?')
+_MAC_RE = re.compile(r'\bMAC (\d+)\b')
+
+
+def _addrs(r):
+    return ' '.join(x for x in (r.src, r.dst, r.key, r.dk, r.o) if x)
+
+
 def _fields(T0):
     def gw(r):
         return [r.o if r.sn is not None else None, r.dst if r.dn is not None else None]
@@ -1200,7 +1218,9 @@ def _fields(T0):
         'reach': lambda r: list(r.adv) if r.adv is not None else [],
         'announcer': lambda r: r.o if r.adv is not None else None, 'write': lambda r: 1 if r.wr else 0,
         'command': lambda r: 1 if r.wr and r.wr['sev'] else 0, 'cov': lambda r: 1 if r.cov else 0,
-        'error': lambda r: 1 if r.er else 0, 'bookmark': lambda r: 1 if r.bm else 0, 'note': lambda r: r.note or ''}
+        'error': lambda r: 1 if r.er else 0, 'bookmark': lambda r: 1 if r.bm else 0, 'note': lambda r: r.note or '',
+        'ip': lambda r: _IP_RE.findall(_addrs(r)),           # any IP in the packet, also behind a router
+        'mac': lambda r: _MAC_RE.findall(_addrs(r))}         # any MS/TP MAC in the packet
     F.update({'ip.addr': F['addr'], 'ip.src': F['src'], 'ip.dst': F['dst'], 'bacnet.device': F['device'],
               'bacnet.net': F['net'], 'frame.len': F['len'], 'frame.number': F['no'], 'mstp.bad': F['bad']})
     return F

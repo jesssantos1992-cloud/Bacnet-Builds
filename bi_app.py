@@ -279,7 +279,7 @@ class PacketsPane(QWidget):
         hh.sectionResized.connect(self._col_dragged)
         self.fit_columns()
         self.tv.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.hl = HighlightDelegate(self.tv)            # colour IPs, MACs, networks and device IDs
+        self.hl = HighlightDelegate(self.tv, clickable=False)   # colour IPs, MACs, networks and device IDs
         for c in (2, 3, 4, 7):
             self.tv.setItemDelegateForColumn(c, self.hl)
         self.det = QTreeWidget()
@@ -287,7 +287,7 @@ class PacketsPane(QWidget):
         self.det.setFont(self.model.mono)
         self.det.setUniformRowHeights(True)
         self.det.setAnimated(True)
-        self.det.setItemDelegate(HighlightDelegate(self.det))
+        self.det.setItemDelegate(HighlightDelegate(self.det, clickable=False))
         self.det.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         cp = QAction('Copy', self.det)
         cp.triggered.connect(lambda: QApplication.clipboard().setText(
@@ -564,15 +564,21 @@ class PacketsPane(QWidget):
         top = QTreeWidgetItem(self.det, [f'Frame {r.no}: {r.len} bytes' + (f' · note: {r.note}' if r.note else '')])
         f = semibold(top.font(0))
         top.setFont(0, f)
-        parent = None
+        at = {}                                    # the last item at each depth, so rows nest as deep as they go
         for lvl, s in C.detail_tree(r):
-            if lvl == 0 or parent is None:
-                parent = QTreeWidgetItem(self.det, [lz(s)])
-                parent.setFont(0, f)
+            par = at.get(lvl - 1) if lvl > 0 else None
+            if par is None:
+                it = QTreeWidgetItem(self.det, [lz(s)])
+                it.setFont(0, f)
+                lvl = 0
             else:
-                it = QTreeWidgetItem(parent, [lz(s)])
+                it = QTreeWidgetItem(par, [lz(s)])
                 if s.startswith('Meaning: '):
                     it.setForeground(0, QColor(colors()['mu']))
+            it.setToolTip(0, s)
+            at[lvl] = it
+            for x in [x for x in at if x > lvl]:
+                del at[x]
         self.det.expandAll()
         self.hex.setPlainText(C.hx(r.d))
 
@@ -823,6 +829,7 @@ class MainWindow(QMainWindow):
         self.labels = Labels(store)
         import bi_common
         bi_common.LABELS = self.labels          # lets tables and trees highlight addresses
+        bi_common.FIND = self.find_link         # clicking a highlighted address shows its packets
         self.bridge = Bridge()
         self.bridge.call.connect(lambda fn: fn())
         self.setWindowTitle(APP_NAME)
@@ -1591,6 +1598,31 @@ class MainWindow(QMainWindow):
         else:
             self.filter_state(f, True)
         self.save_session()
+
+    def find_link(self, href):
+        """A highlighted IP, MAC, network or device ID was clicked: show the packets that involve it."""
+        import re
+        from urllib.parse import unquote
+        kind, _, val = unquote(href[3:]).partition('|')
+        if not self.ac:
+            return self.toast('Open a capture to find this in the packets')
+        n = (re.search(r'\d+', val) or [''])[0] if kind in ('mac', 'net', 'id') else ''
+        if kind == 'ip':
+            f, what = f'ip == "{val}"', val
+        elif kind == 'host':
+            f, what = f'host == "{val}"', val
+        elif kind == 'mac':
+            f, what = f'mac == {n}', f'MAC {n}'
+        elif kind == 'net':
+            f, what = f'net == {n} || dnet == {n}', f'network {n}'
+        elif kind == 'id':
+            keys = sorted(k for k, ids in C.kid_map(self.FD).items() if int(n) in ids and k)
+            f = ' || '.join([f'host == "{k}"' for k in keys] + [f'device == {n}'])
+            what = f'device {n}'
+        else:
+            return
+        self.go_packets(f)
+        self.toast(f'{C.locale_int(len(self.pk.V))} packets involve {what}' if self.pk.V else f'No packets involve {what}')
 
     def go_packets(self, f):
         self.goto('p')

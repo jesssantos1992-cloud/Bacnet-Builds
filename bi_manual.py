@@ -196,9 +196,14 @@ packet underneath.</p>
 <b>network numbers</b> in purple and <b>device IDs</b> in green. Rows with damaged frames have a red tint. Names you
 have given devices and networks (see {go('names', 'Names and labels')}) appear next to their numbers.</p>
 <h3>Details and bytes</h3>
-<p>Click a packet to decode it in the lower-left panel, layer by layer, ending with a <i>Meaning</i> line in plain
-English. The lower-right panel shows the raw bytes. Drag the divider between the list and the details to resize them
-(View &gt; Reset pane size puts them back). Right-click the details to copy them.</p>
+<p>Click a packet to decode it in the lower-left panel, layer by layer, with a <i>Meaning</i> line in plain English.
+The BACnet APDU part shows everything the message carries, like Wireshark: invoke ID, max response size,
+segmentation, the service, and every parameter – which object and property, the values (with units, states and
+flags named), priorities, time stamps, errors – nested as deep as the message goes. For example a COV notification
+shows the subscriber, the device, the object, the time remaining and each changed value; a trend log read shows each
+record as <i>time = value</i>. Hover over a line that is cut off to read all of it. The lower-right panel shows the
+raw bytes. Drag the divider between the list and the details to resize them (View &gt; Reset pane size puts them
+back). Right-click the details to copy them.</p>
 <h3>Working with the list</h3>
 <ul>
 <li><b>Sort</b> – click a column title; click again to reverse; a third time to go back to capture order. Big
@@ -251,6 +256,9 @@ Right-click a saved button to remove it.</p>
 <tr><td><code>no</code>, <code>time</code>, <code>len</code></td><td>packet number, seconds from the start, size</td></tr>
 <tr><td><code>src</code>, <code>dst</code>, <code>addr</code></td><td>source, destination, either address (as shown in the list)</td></tr>
 <tr><td><code>host</code></td><td>the sender <i>or</i> the receiver</td></tr>
+<tr><td><code>ip</code></td><td>an IP address anywhere in the packet – sender, receiver or router, with or without the port:
+<code>ip == "10.0.0.5"</code></td></tr>
+<tr><td><code>mac</code></td><td>an MS/TP MAC anywhere in the packet: <code>mac == 5</code></td></tr>
 <tr><td><code>from</code>, <code>to</code></td><td>the logical sender / receiver (the device itself, even behind a router)</td></tr>
 <tr><td><code>proto</code></td><td><code>"BACnet/IP"</code> or <code>"MS/TP"</code></td></tr>
 <tr><td><code>info</code></td><td>the Info text</td></tr>
@@ -283,6 +291,10 @@ problems and explains each one:</p>
 <li><b>Why it matters</b> – what it does to the building.</li>
 <li><b>How to troubleshoot</b> – numbered steps to fix it.</li>
 </ul>
+<p><b>Click any highlighted address</b> – an IP address, an MS/TP MAC, a network number or a device ID – to jump to
+the Packets page showing only the packets that involve it. This works everywhere addresses are highlighted:
+Findings, Devices, Compare and the other tables. The pointer turns into a hand over them. (In the packet list itself
+double-click a cell instead.) For a device ID the filter covers every address that device used.</p>
 <p>Each finding is marked <span style="color:#d70015"><b>SERIOUS</b></span>,
 <span style="color:#b86e00"><b>WARNING</b></span> or <span style="color:#248a3d"><b>NOTE</b></span>. A tab with serious
 findings shows a ⚠ and their number. The checks include:</p>

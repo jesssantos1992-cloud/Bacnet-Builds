@@ -1,31 +1,3 @@
-- New user manual (Help > User manual, or F1): every part of the app explained step by step, with search, troubleshooting, a BACnet glossary and all keyboard shortcuts. F1 opens it at the page you are on, and it can be saved as a web page to print.
-- New here? A short guided tour shows you around the first time you open the app (Help > Take the tour to see it again).
-- Tips pop up once as you work, pointing out shortcuts and quicker ways (Help > Show tips to turn them on or off).
-- A new, cleaner look: a calmer sidebar with line icons, a sliding Capture / Discover switch, one accent colour, softer cards, roomier rows and the title bar now blends into the window.
-- Search everything with Ctrl+K (or the Search box at the top): jump to any view, device, point, capture tab or command by typing.
-- Discover: clicking a point opens its details in a panel that slides in on the right, so the list of points stays in view.
-- Technical fields (firmware, Max APDU, calibration, BACnet configuration, property list) are tucked under "Technical details".
-- A thin progress line under the toolbar while captures open, scans run or long lists sort, plus spinners and placeholder rows while data loads.
-- Friendlier empty pages with a button to open or start a capture.
-- Messages now appear as a small banner at the bottom; closing a capture tab can be undone.
-- The app reopens on the view you last used, and shows what is new after an update (Help > What's new).
-- New About window (Help > About).
-- Discover: new Back and Discover home buttons, plus a clickable path (Network > Device > Category > Point).
-- The mouse Back button and Alt+Left go back too.
-- IP addresses, MS/TP MACs, network numbers and device IDs are highlighted again in the packet list, packet details, tables and the Devices tree.
-- Fixed: text could briefly draw on top of itself when a page updated.
-- Fixed: on smaller screens the packet list's Info column was pushed off screen, and some pages were cut off on the right.
-- Fixed: in light mode the unselected Capture / Discover switch was hard to read; checkboxes after a theme change.
-- MS/TP trunk: clearer message when a capture has no token passing in it.
-- Discover over MS/TP: choose Connection: MS/TP, pick your USB RS-485 adapter, press Join trunk. The PC listens first, picks a free MAC address, joins the token ring and can scan and read points directly on the trunk (no router needed).
-- Excel export: every Save / Export menu now offers an Excel (.xlsx) version next to CSV.
-- Discover: Active alarms button on a device lists points in alarm (state, acknowledged, type).
-- Point details: new Alarm & status section (status flags, event state, high/low limits, deadband, notification class) and a Read all properties button with Copy and Export.
-- While Discover is joined to an MS/TP trunk, its frames show in the Live capture tab so you can see the traffic.
-- Sorting a very large capture no longer freezes the window, and re-sorting is much faster.
-- Smaller download: unused parts of Qt are no longer included.
-- The About window and the manual now credit the author, Jesse Santos.
-- Site inventory: Discover > Site inventory… reads every device's details and object list and saves an Excel workbook with one row per device (vendor, model, firmware, address, and counts of AI/AO/AV/BI/BO/BV, multi-state, trend logs, schedules and more).
-- Discover through a BBMD: the result of the foreign-device registration is now shown (accepted, refused or no answer), and a BBMD on a port other than 47808 can be entered as address:port.
-- A galactic mouse pointer inside the app: a nebula arrow with stars and a glowing star at the tip (View > Galactic cursor turns it off).
-- Help > Report a problem…: unexpected errors are written to a problem log instead of going unnoticed, with Copy details and Open log folder buttons.
+- Packet details now show the full contents of every BACnet message, like Wireshark: invoke ID, max response size, the service and every parameter – objects, properties, values with units and states, priorities, time stamps, errors – nested as deep as the message goes. COV notifications show their changed values in the Info column too.
+- Click any highlighted IP address, MS/TP MAC, network or device ID (in Findings, Devices, Compare and the other tables) to see just the packets that involve it. New display filters: ip == "10.0.0.5" and mac == 5.
+- Hover over a line in the packet details that is cut off to read all of it.
