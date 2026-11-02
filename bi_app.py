@@ -17,14 +17,15 @@ from PySide6.QtGui import (QAction, QColor, QFont, QGuiApplication, QIcon, QKeyS
                            QShortcut)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
-                               QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+                               QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
-                               QPlainTextEdit, QPushButton, QSizePolicy, QSplitter, QStackedWidget, QSystemTrayIcon,
+                               QPlainTextEdit, QPushButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QSystemTrayIcon,
                                QTabBar, QTableView, QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
 import bacnet_live as BL
 import bi_core as C
+import bi_points
 import bi_ui as U
 from bi_common import (AUTHOR, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
                        label, semibold, stamp)
@@ -805,15 +806,18 @@ def side_icon(k):
 
 
 SIDE = [(None, None), ('p', 'Packets'), ('Analyze', None), ('f', 'Findings'), ('d', 'Devices'), ('w', 'Changes'),
-        ('t', 'Traffic'), ('s', 'Response times & errors'), ('o', 'Online board'), ('Network', None),
+        ('h', 'Point history'), ('e', 'Alarms & events'), ('t', 'Traffic'), ('s', 'Response times & errors'),
+        ('o', 'Online board'), ('Network', None),
         ('g', 'Network map'), ('a', 'Available IDs'), ('n', 'Available networks'), ('MS/TP', None),
         ('m', 'MS/TP trunk'), ('b', 'Bus speed'), ('Tools', None), ('c', 'Compare captures')]
 VNAME = {'p': 'packets', 'f': 'findings', 'd': 'devices', 'a': 'available-ids', 'n': 'available-networks',
          's': 'response-times', 'c': 'compare', 'b': 'bus-speed', 'o': 'online', 'w': 'changes', 't': 'traffic',
-         'm': 'mstp-trunk', 'g': 'network-map', 'x': 'explorer', 'r': 'report'}
+         'm': 'mstp-trunk', 'g': 'network-map', 'x': 'explorer', 'r': 'report', 'h': 'point-history', 'e': 'alarms',
+         'site': 'site-report'}
 VTITLE = {'p': 'Packets', 'f': 'Findings', 'd': 'Devices', 'a': 'Available IDs', 'n': 'Available Networks',
           's': 'Response times & errors', 'c': 'Compare', 'b': 'Bus speed', 'o': 'Online board', 'w': 'Changes',
-          't': 'Traffic', 'm': 'MS/TP trunk', 'g': 'Network map', 'x': 'Discover'}
+          't': 'Traffic', 'm': 'MS/TP trunk', 'g': 'Network map', 'x': 'Discover', 'h': 'Point history',
+          'e': 'Alarms & events'}
 
 
 # ============================================================ main window --
@@ -858,7 +862,7 @@ class MainWindow(QMainWindow):
         self.nav = []
         self.nav_lock = False
         self.ALR = []
-        self.WS = {'init': 0, 'dev': set(), 'fit': set(), 'stat': {}, 'rb': 0}
+        self.WS = {'init': 0, 'dev': set(), 'fit': set(), 'stat': {}, 'rb': 0, 'al': 0}
         self.upd = None
         self.tray = None
         from bi_explore import Explorer
@@ -1113,6 +1117,7 @@ class MainWindow(QMainWindow):
         act(m, 'Save', lambda: self.do_save(False), 'Ctrl+S', lambda: self.ac or self.cur_view == 'x')
         act(m, 'Save As…', lambda: self.do_save(True), 'Ctrl+Shift+S', lambda: self.ac or self.cur_view == 'x')
         act(m, 'Export report…', self.do_report, None, lambda: self.ac)
+        act(m, 'Site report (PDF)…', self.site_report, None, lambda: self.ac)
         m.addSeparator()
         act(m, 'Exit', self.close)
         m.aboutToShow.connect(lambda m=m: refresh(m))
@@ -1127,6 +1132,8 @@ class MainWindow(QMainWindow):
         act(m, 'Show bookmarked packets', lambda: self.go_packets('bookmark'), None, lambda: self.ac)
         m.addSeparator()
         act(m, 'Names & labels…', self.labels_dlg)
+        act(m, 'Import point names…', self.import_points)
+        act(m, 'Clear point names', self.clear_points, None, lambda: self.store.labels()['p'])
         m.aboutToShow.connect(lambda m=m: refresh(m))
         m = mb.addMenu('&View')
         for t, k in [('Packets', 'p'), ('Findings', 'f'), ('Devices', 'd'), ('Online board', 'o'),
@@ -1158,6 +1165,8 @@ class MainWindow(QMainWindow):
         self.m_arm = act(m, 'Enable write access…', lambda: self.disarm() if self.explorer.armed() else self.arm_dlg())
         act(m, 'Scan network for devices', lambda: (self.goto('x'), self.view('x').scan()), 'Ctrl+D', lambda: not self.explorer.busy)
         act(m, 'Discovery options…', lambda: self.view('x').options())
+        act(m, 'Long capture…', self.long_capture_dlg)
+        act(m, 'Site profiles…', self.sites_dlg)
         act(m, 'Build site inventory…', lambda: (self.goto('x'), self.view('x').inventory()), None,
             lambda: not self.explorer.busy)
         m.addSeparator()
@@ -1733,6 +1742,7 @@ class MainWindow(QMainWindow):
         self.clear_live(local_only=True)
         self.cap.start(s['backend'], s['id'], self.live.cf.text(), int(self.live.bd.currentText()))
         self.run = True
+        self.roll_start()
         self.poll_timer.start()
         self.poll()
         self.tip('live', self.live.follow, 3000)
@@ -1750,7 +1760,7 @@ class MainWindow(QMainWindow):
         self.LT.FD = C.Analysis()
         self.LT.T0 = 0
         self.LT.next_no = 1
-        self.WS = {'init': 0, 'dev': set(), 'fit': set(), 'stat': {}, 'rb': 0}
+        self.WS = {'init': 0, 'dev': set(), 'fit': set(), 'stat': {}, 'rb': 0, 'al': 0}
         if self.ac is self.LT:
             self.P, self.FD, self.T0 = self.LT.P, self.LT.FD, 0
             self.pk.relist()
@@ -1777,6 +1787,13 @@ class MainWindow(QMainWindow):
             for ts, lt, d in items:
                 LT.P.append(C.dis(ts, lt, d, LT.next_no))
                 LT.next_no += 1
+            if self.roll:
+                try:
+                    for ts, lt, d in items:
+                        self.roll.write(ts, lt, d)
+                    self.roll.flush()
+                except OSError as e:
+                    self.roll_stop(f'Long capture stopped: {e.strerror}')
             if len(LT.P) > LIVE_MAX:
                 del LT.P[:len(LT.P) - LIVE_MAX]
             self.live_dirty = True
@@ -1807,6 +1824,8 @@ class MainWindow(QMainWindow):
         if running != self.run:
             self.run = running
             self.update_tabs()
+            if not running:
+                self.roll_stop()
             if not running and not self._feed:
                 self.poll_timer.stop()
         self.live.set_running(running, len(LT.P))
@@ -1814,6 +1833,7 @@ class MainWindow(QMainWindow):
             self.live.ls.setText(f'● MS/TP link (Discover) – {C.locale_int(len(LT.P))} frames')
 
     _feed = False
+    roll = None
 
     def mstp_feed(self, on):
         """While Discover is joined to an MS/TP trunk, its frames appear in the Live capture tab."""
@@ -1916,6 +1936,12 @@ class MainWindow(QMainWindow):
                 who = f"Device {', '.join(map(str, r['ids']))} ({r['k']})" if r['ids'] else r['k']
                 self.alert(f"{who} has gone silent (not heard for {C.gap(r['si'])})")
             WS['stat'][r['k']] = r['st']
+        al = F.al or []
+        if len(al) > WS['al']:
+            if WS['init'] and live and cfg['alm']:
+                for a in al[WS['al']:][:5]:
+                    self.alert(f"Alarm: {a['obj']} {a['was']} → {a['now']} ({a['type']})")
+            WS['al'] = len(al)
         if (F.rb or 0) > WS['rb']:
             if WS['init'] and live and cfg['busy']:
                 self.alert('A router reports it is busy (Router-Busy)')
@@ -1923,7 +1949,7 @@ class MainWindow(QMainWindow):
         WS['init'] = 1
 
     def watch_cfg(self):
-        c = {'dev': 1, 'sil': 1, 'prob': 1, 'busy': 1, 'snd': 0, 'ntf': 0}
+        c = {'dev': 1, 'sil': 1, 'prob': 1, 'busy': 1, 'alm': 1, 'snd': 0, 'ntf': 0}
         c.update(self.store.get('bi_watch') or {})
         return c
 
@@ -1931,6 +1957,11 @@ class MainWindow(QMainWindow):
         self.ALR.append({'t': time.time(), 'm': m})
         del self.ALR[:-300]
         self.toast(m)
+        if self.roll:
+            try:
+                self.roll.log(m)
+            except OSError:
+                pass
         cfg = self.watch_cfg()
         if cfg['snd']:
             QApplication.beep()
@@ -2154,6 +2185,107 @@ class MainWindow(QMainWindow):
                  r.o if r.sn is not None else '', r.proto, r.len, r.info, r.exp or '', 'yes' if r.bm else '', r.note or '']
                 for r in self.pk.V]
         return csv_text('No.,Time,Source,Destination,Gateway,Protocol,Length,Info,Meaning,Bookmark,Note', rows)
+
+    def site_report(self):
+        import bi_views
+        d = bi_views.SiteReportDialog(self)
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+        info = d.info()
+        self.store.set('bi_report', {k: info[k] for k in ('customer', 'site', 'tech')})
+        fm = [('pdf', 'PDF – a site report to hand over or email (*.pdf)', 'pdf', lambda: bi_views.pdf_report(self, info))]
+        self.save_as('site', fm, self.ac.sv, 'Save site report')
+
+    def import_points(self):
+        p, _ = QFileDialog.getOpenFileName(self, 'Import point names', self.store.get('bi_sdir') or '', 'Point list (*.csv *.txt)')
+        if p:
+            self.load_points(p)
+
+    def load_points(self, path):
+        try:
+            with open(path, encoding='utf-8-sig', errors='replace') as f:
+                names, bad = bi_points.parse_point_names(f.read())
+        except OSError as e:
+            return self.toast(f'Could not read the file: {e.strerror}')
+        if not names:
+            return self.toast('No point names found. The file needs columns for device, object and name.')
+        self.store.labels()['p'].update(names)
+        self.store.save_labels()
+        self.refresh_views()
+        self.toast(C.pl(len(names), 'point name') + ' imported' + (f', {bad} lines skipped' if bad else ''))
+
+    def clear_points(self):
+        self.store.labels()['p'].clear()
+        self.store.save_labels()
+        self.refresh_views()
+        self.toast('Point names cleared')
+
+    def sites_dlg(self):
+        import bi_views
+        bi_views.SitesDialog(self).exec()
+
+    def long_capture_dlg(self):
+        d = QDialog(self)
+        d.setWindowTitle('Long capture')
+        d.resize(520, 240)
+        o = self.long_cfg()
+        form = QFormLayout(d)
+        form.addRow(label('Save everything to a folder while capturing, so you can leave it running overnight. A new file starts '
+                          'every few minutes, the oldest are removed, and problems.txt lists every alert with its time.', muted=True))
+        on = QCheckBox('Save the live capture to a folder')
+        on.setChecked(bool(o['on']))
+        form.addRow(on)
+        row = QHBoxLayout()
+        folder = QLineEdit(o['dir'])
+        pick = QPushButton('Browse…')
+        pick.clicked.connect(lambda: folder.setText(QFileDialog.getExistingDirectory(d, 'Long capture folder', folder.text()) or folder.text()))
+        row.addWidget(folder, 1)
+        row.addWidget(pick)
+        form.addRow('Folder', row)
+        mins = QSpinBox()
+        mins.setRange(1, 1440)
+        mins.setValue(o['min'])
+        mins.setSuffix(' minutes')
+        keep = QSpinBox()
+        keep.setRange(1, 10000)
+        keep.setValue(o['keep'])
+        keep.setSuffix(' files')
+        form.addRow('New file every', mins)
+        form.addRow('Keep the last', keep)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        form.addRow(bb)
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+        if on.isChecked() and not folder.text().strip():
+            return self.toast('Pick a folder for the long capture')
+        self.store.set('bi_long', {'on': on.isChecked(), 'dir': folder.text().strip(), 'min': mins.value(), 'keep': keep.value()})
+        self.toast('Takes effect the next time you press Start' if self.run else 'Long capture settings saved')
+
+    def long_cfg(self):
+        o = {'on': False, 'dir': '', 'min': 30, 'keep': 48}
+        o.update(self.store.get('bi_long') or {})
+        return o
+
+    def roll_start(self):
+        self.roll = None
+        o = self.long_cfg()
+        if o['on'] and o['dir']:
+            try:
+                self.roll = bi_points.Rolling(o['dir'], o['min'], o['keep'])
+                self.toast('Long capture: saving to ' + o['dir'])
+            except OSError as e:
+                self.toast(f'Long capture could not start: {e.strerror}')
+
+    def roll_stop(self, why=''):
+        r, self.roll = self.roll, None
+        if r:
+            try:
+                r.close()
+            except OSError:
+                pass
+            self.toast(why or f'Long capture saved {C.pl(r.count, "packet")} to {r.folder}')
 
     def do_report(self):
         if not self.ac:

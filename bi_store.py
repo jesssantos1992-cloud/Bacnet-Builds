@@ -23,7 +23,7 @@ class Store:
         except (OSError, ValueError):
             self.d = {}
         lb = self.d.get('bi_labels') or {}
-        self._labels = {'d': dict(lb.get('d') or {}), 'n': dict(lb.get('n') or {})}
+        self._labels = {'d': dict(lb.get('d') or {}), 'n': dict(lb.get('n') or {}), 'p': dict(lb.get('p') or {})}
         self._timer = None
 
     def get(self, k, default=None):
@@ -58,7 +58,7 @@ class Store:
         except OSError:
             pass
 
-    # ---- names for device IDs ('d') and networks ('n'); keys are strings
+    # ---- names for device IDs ('d'), networks ('n') and points ('p', 'device|object'); keys are strings
     def labels(self):
         return self._labels
 

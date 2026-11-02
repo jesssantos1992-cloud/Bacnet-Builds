@@ -1,0 +1,27 @@
+# Builds the Mac app on GitHub's Macs whenever a release is published and adds it to that release.
+name: Build Mac app
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to add the Mac app to (for example v1.4.0)
+        required: true
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash build_mac.sh
+      - run: gh release upload "$TAG" dist/BACnet-Inspector-Mac-*.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}

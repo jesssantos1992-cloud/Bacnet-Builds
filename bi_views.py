@@ -10,15 +10,17 @@ import math
 import re
 import time
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter
+from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QPointF, QRectF, QSizeF, Qt, QTimer
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen, QPolygonF,
+                           QTextDocument)
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit,
                                QPushButton, QScrollArea, QTextBrowser, QToolButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
+import bi_points
 import bi_ui as U
 from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, find_href, link_finds, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
@@ -430,11 +432,13 @@ class ChangesView(BaseView):
         v.addLayout(self.top)
         v.addWidget(hint('Every change request sent on the network: who sent it, which device and point, the new value, the '
                          'priority and whether the device accepted it. “Commands” are restarts, communication on/off and '
-                         'object create/delete. Double-click a row to see the packet.'))
+                         'object create/delete. Pick “Value changes” under Show to see points changing by themselves. '
+                         'Double-click a row to see the packet.'))
         row = QHBoxLayout()
         row.addWidget(QLabel('Show'))
         self.wf = QComboBox()
-        for t, k in [('Everything', 'all'), ('Point writes', 'w'), ('Restarts and commands', 'c'), ('Refused only', 'r')]:
+        for t, k in [('Everything', 'all'), ('Point writes', 'w'), ('Restarts and commands', 'c'), ('Refused only', 'r'),
+                     ('Value changes (COV)', 'v')]:
             self.wf.addItem(t, k)
         row.addWidget(self.wf)
         self.wq = QLineEdit()
@@ -456,7 +460,10 @@ class ChangesView(BaseView):
         L = self.win.FD.wr or []
         WF = self.wf.currentData()
         WQ = self.wq.text().lower()
-        R = [w for w in L if WF == 'all' or (WF == 'w' and w['sev'] == 0) or (WF == 'c' and w['sev'] >= 1) or
+        if WF == 'v':
+            L = [{'t': x['t'], 'no': x['no'], 'from': x['key'], 'to': '', 'svc': 'Value change', 'obj': x['obj'], 'prop': x['prop'],
+                  'val': f"{x['old']} → {x['new']}", 'pri': None, 'res': 'reported', 'sev': 0} for x in self.win.FD.vc or []]
+        R = [w for w in L if WF in ('all', 'v') or (WF == 'w' and w['sev'] == 0) or (WF == 'c' and w['sev'] >= 1) or
              (WF == 'r' and re.match(r'^(failed|rejected|cancelled)', w['res']))]
         if WQ:
             R = [w for w in R if WQ in f"{w['from']} {w['to']} {w['obj']} {w['prop']} {w['val']} {w['svc']}".lower()]
@@ -479,6 +486,9 @@ class ChangesView(BaseView):
             pills.append((C.pl(cmd, 'command'), 'WARNING'))
         if rf:
             pills.append((f'{rf} refused', 'SERIOUS'))
+        vc = len(win.FD.vc or [])
+        if vc:
+            pills.append((C.pl(vc, 'value change'), 'NOTE'))
         self.top.addWidget(summary_row('Writes and commands' if L else 'No writes or commands in this capture', pills))
         km = C.kid_map(win.FD)
         c = colors()
@@ -506,7 +516,7 @@ class ChangesView(BaseView):
         def csv():
             return csv_text('Time (s),Packet,From,To,Action,Point,Property,New value,Priority,Result',
                             [[C.tofixed(x['t'] - w.T0, 3), x['no'], x['from'], x['to'], x['svc'], x['obj'], x['prop'], x['val'],
-                              '' if x['pri'] is None else x['pri'], x['res'] or 'no answer seen'] for x in (w.FD.wr or [])])
+                              '' if x['pri'] is None else x['pri'], x['res'] or 'no answer seen'] for x in (self.rows() if self.wf.currentData() == 'v' else w.FD.wr or [])])
         return PageView.savef(self, 'Changes', html, csv)
 
 
@@ -604,6 +614,17 @@ class ResponseView(PageView):
                    'Controllers usually answer in well under half a second; a typical time over 1 second, or many unanswered '
                    'requests, points to an overloaded device or a poor connection. Double-click a row to see its packets.'))
         c = colors()
+        H = win.FD.hl or []
+        if H:
+            p.add(heading('Device health'))
+            p.add(hint('A score out of 100 from unanswered requests, answer time and errors: 85 or more is Good, 60 or more is Fair. '
+                       'It only covers devices that were asked something during this capture.'))
+            tone = {'Good': c['no'], 'Fair': c['wa'], 'Poor': c['se']}
+            self.table(p, ['Device', 'Address', 'Score', 'Health', 'Why'],
+                       [[', '.join(win.labels.lz(f'Device {i}') for i in h['ids']) or ('not announced in this capture', {'fg': c['mu']}),
+                         h['key'], h['score'], (h['rate'], {'fg': tone[h['rate']], 'bold': True}), '; '.join(h['why'])] for h in H],
+                       [f'host == "{h["key"]}"' for h in H], max_rows=12)
+            p.add(heading('Response times'))
         if L:
             rows = []
             for e in L:
@@ -672,7 +693,7 @@ class OnlineView(PageView):
         cfg = win.watch_cfg()
         boxes = [label('Alert me when', bold=True, wrap=False)]
         for k, t in [('dev', 'a new device appears'), ('sil', 'a device goes silent'), ('prob', 'a new problem is found'),
-                     ('busy', 'a router says it is busy'), ('snd', 'play a sound'), ('ntf', 'desktop notification')]:
+                     ('busy', 'a router says it is busy'), ('alm', 'an alarm or event arrives'), ('snd', 'play a sound'), ('ntf', 'desktop notification')]:
             cb = QCheckBox(t)
             cb.setChecked(bool(cfg[k]))
             cb.toggled.connect(lambda on, k=k: self.set_cfg(k, on))
@@ -1690,6 +1711,7 @@ class CompareView(BaseView):
         tot = sum(len(R[k]) for k in ('newD', 'gone', 'moved', 'renum', 'newN', 'goneN', 'gwN', 'newF', 'fixedF'))
         h = (f"<p><b>{esc(A.n)}</b> ({C.pl(R['na'], 'device')}, {C.pl(R['fa'], 'finding')}) → <b>{esc(B.n)}</b> "
              f"({C.pl(R['nb'], 'device')}, {C.pl(R['fb'], 'finding')})</p>" +
+             f"<p><b>Before and after:</b> {len(R['fixedF'])} fixed, {len(R['sameF'])} still there, {len(R['newF'])} new.</p>" +
              ('' if tot else '<p><b>No differences found.</b> The same devices, addresses and networks appear in both captures.</p>'))
         h += sec('New devices', len(R['newD']), ul(R['newD'], lambda x: dd(x['id'], x['keys'])), 'WARNING')
         h += sec('Missing devices', len(R['gone']), ul(R['gone'], lambda x: dd(x['id'], x['keys']) + ' <i>was in the first capture only</i>'), 'WARNING')
@@ -1700,6 +1722,7 @@ class CompareView(BaseView):
         h += sec('Networks reached through a different gateway', len(R['gwN']), ul(R['gwN'], lambda x: f"{hl('network ' + str(x['n']))}: {', '.join(map(hl, x['from']))} → {', '.join(map(hl, x['to']))}"), 'WARNING')
         h += sec('New problems', len(R['newF']), ul(R['newF'], lambda f: f"<b>{esc(f['s'])}</b> {hl(f['t'])}"), 'SERIOUS')
         h += sec('Problems that went away', len(R['fixedF']), ul(R['fixedF'], lambda f: f"<b>{esc(f['s'])}</b> {hl(f['t'])}"), 'NOTE')
+        h += sec('Problems still there', len(R['sameF']), ul(R['sameF'], lambda f: f"<b>{esc(f['s'])}</b> {hl(f['t'])}"), 'WARNING')
         return h
 
     def formats(self):
@@ -1732,6 +1755,8 @@ class CompareView(BaseView):
                     o.append(['New problem', f['t'], '', f['s']])
                 for f in R['fixedF']:
                     o.append(['Resolved problem', f['t'], f['s'], ''])
+                for f in R['sameF']:
+                    o.append(['Problem still there', f['t'], f['s'], f['s']])
             return '﻿' + csv_text('Category,Item,Before,After', o)
         return [('html', 'Web page – the comparison as shown (*.html)', 'html', html),
                 ('csv', 'Spreadsheet – one row per difference, for Excel (*.csv)', 'csv', csv)]
@@ -1779,11 +1804,17 @@ def rep_model(win):
             'notes': [{'no': r.no, 't': C.tofixed(r.t - win.T0, 3), 'info': r.info, 'note': r.note or ''} for r in P if r.bm]}
 
 
-def html_report(win):
+def html_report(win, info=None):
+    """info: the customer, site, technician and notes of a site report."""
     R = rep_model(win)
     H = lambda x: win.labels.hl(str(x), True)  # noqa: E731
-    b = (f'<div style="max-width:900px"><h1>BACnet network report</h1><p class="mu">{esc(R["name"])} · {esc(R["when"])} · '
-         f'{C.locale_int(R["pk"])} packets over {esc(R["du"])} ({esc(R["pr"])})</p><h2>Summary</h2><p style="font-size:16px"><b>{esc(R["head"])}</b></p>')
+    info = info or {}
+    who_ = ''.join(f'<tr><td><b>{t}</b>&nbsp;&nbsp;</td><td>{esc(info[k])}</td></tr>' for k, t in SiteReportDialog.FIELDS if info.get(k))
+    b = (f'<div style="max-width:900px"><h1>BACnet {"site" if info else "network"} report</h1>' + (f'<table>{who_}</table>' if who_ else '') +
+         f'<p class="mu">{esc(R["name"])} · {esc(R["when"])} · '
+         f'{C.locale_int(R["pk"])} packets over {esc(R["du"])} ({esc(R["pr"])})</p>' +
+         (f'<h2>Work done</h2><p>{esc(info["notes"])}</p>' if info.get('notes') else '') +
+         f'<h2>Summary</h2><p style="font-size:16px"><b>{esc(R["head"])}</b></p>')
     if R['finds']:
         b += '<ol>' + ''.join(f"<li><b>{esc(f['s'])}</b> – {H(f['t'])}</li>" for f in R['finds']) + '</ol>'
         b += '<h2>What we found and what to do</h2>'
@@ -1810,6 +1841,17 @@ def html_report(win):
         b += '<h2>Slow or silent devices</h2>' + html_table(['Device', 'Address', 'Answered', 'No answer', 'Typical', 'Worst'],
              [[', '.join(H('Device ' + str(i)) for i in e['ids']) or '—', H(e['key']), e['n'], e['miss'] or '',
                C.fmt_ms(e['med']) if e['n'] else '', C.fmt_ms(e['max']) if e['n'] else ''] for e in R['slow']])
+    bad = [h for h in win.FD.hl or [] if h['rate'] != 'Good']
+    if win.FD.hl:
+        b += (f"<h2>Device health</h2><p>{len(win.FD.hl) - len(bad)} of {C.pl(len(win.FD.hl), 'measured device')} rated Good.</p>" +
+              (html_table(['Device', 'Address', 'Score', 'Health', 'Why'],
+                          [[', '.join(H('Device ' + str(i)) for i in h['ids']) or '—', H(h['key']), h['score'], h['rate'], esc('; '.join(h['why']))]
+                           for h in bad]) if bad else ''))
+    al = win.FD.al or []
+    if al:
+        b += f"<h2>Alarms and events ({len(al)})</h2>" + html_table(['Time (s)', 'From', 'Point', 'Event', 'State', 'Acknowledged'],
+             [[C.tofixed(a['t'] - win.T0, 1), H(a['from']), esc(a['obj']), esc(a['type']), esc(f"{a['was']} → {a['now']}"),
+               'yes' if a['ack'] else 'waiting' if a['need'] else 'not needed'] for a in al[:200]])
     if R['notes']:
         b += '<h2>Notes and bookmarked packets</h2>' + html_table(['Packet', 'Time (s)', 'What', 'Note'],
              [[n['no'], n['t'], H(n['info']), esc(n['note'])] for n in R['notes']])
@@ -1844,6 +1886,484 @@ def txt_report(win):
     if R['notes']:
         L += ['', 'NOTES'] + [f"  Packet {n['no']} ({n['t']}s) {n['info']}{' - ' + n['note'] if n['note'] else ''}" for n in R['notes']]
     return '\n'.join(L)
+
+
+# ============================================================ point history --
+def point_label(win, e, km=None):
+    """'analog-input 1 “Supply temp”' using the imported point names."""
+    km = km if km is not None else C.kid_map(win.FD)
+    dev = e['dev'] if e['dev'] is not None else next(iter(sorted(km.get(e['key'], []))), None)
+    nm = win.labels.p(dev, e['obj'])
+    return e['obj'] + (f' “{nm}”' if nm else '')
+
+
+class PointChart(QWidget):
+    """A point's value over the capture as a stepped line, with a marker at each write."""
+    M_L, M_R, M_T, M_B = 76, 18, 14, 26
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.e = None
+        self.cats = []
+        self.setMinimumHeight(230)
+        self.setMouseTracking(True)
+
+    def show_point(self, e):
+        self.e = e
+        self.cats = []
+        if e and e['s'] and not any(s[2] is not None for s in e['s']):    # text values: one level per value
+            self.cats = list(dict.fromkeys(s[1] for s in e['s']))
+        self.update()
+
+    def series(self):
+        e = self.e
+        if self.cats:
+            return [(s[0], float(self.cats.index(s[1])), s) for s in e['s']]
+        if not e['s']:                                  # only ever written: graph the written values
+            W = [(w[0], w[1], bi_points.number(w[1]), w[2]) for w in e['w']]
+            return [(s[0], s[2], s) for s in W if s[2] is not None]
+        return [(s[0], s[2], s) for s in e['s'] if s[2] is not None]
+
+    def scale(self):
+        S = self.series()
+        ts = [x[0] for x in S] + [w[0] for w in self.e['w']]
+        t0, t1 = min(ts), max(ts)
+        vs = [x[1] for x in S] or [0.0]
+        lo, hi = min(vs), max(vs)
+        if hi == lo:
+            lo, hi = lo - 1, hi + 1
+        pad = (hi - lo) * .08
+        return S, t0, (t1 - t0) or 1, lo - pad, hi + pad
+
+    def xy(self, t, v, sc):
+        _, t0, dt, lo, hi = sc
+        w, h = self.width() - self.M_L - self.M_R, self.height() - self.M_T - self.M_B
+        return QPointF(self.M_L + (t - t0) / dt * w, self.M_T + (1 - (v - lo) / (hi - lo)) * h)
+
+    def paintEvent(self, _ev):
+        c = colors()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        e = self.e
+        if not e or not (e['s'] or e['w']):
+            p.setPen(QColor(c['mu']))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, 'Pick a point above to see its values over time')
+            p.end()
+            return
+        sc = self.scale()
+        S, t0, dt, lo, hi = sc
+        fm = p.fontMetrics()
+        h = self.height() - self.M_B
+        right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        grid = QColor(c['mu'])
+        grid.setAlpha(50)
+        for i in range(5):
+            v = lo + (hi - lo) * i / 4
+            y = self.xy(t0, v, sc).y()
+            p.setPen(grid)
+            p.drawLine(QPointF(self.M_L, y), QPointF(self.width() - self.M_R, y))
+            if not self.cats:
+                p.setPen(QColor(c['mu']))
+                p.drawText(QRectF(0, y - 9, self.M_L - 8, 18), right, f'{v:.6g}')
+        p.setPen(QColor(c['mu']))
+        for i, t in enumerate(self.cats):
+            y = self.xy(t0, float(i), sc).y()
+            p.drawText(QRectF(0, y - 9, self.M_L - 8, 18), right, fm.elidedText(t, Qt.TextElideMode.ElideRight, self.M_L - 8))
+        for i in range(5):
+            t = t0 + dt * i / 4
+            x = self.xy(t, lo, sc).x()
+            a = Qt.AlignmentFlag.AlignLeft if i == 0 else Qt.AlignmentFlag.AlignRight if i == 4 else Qt.AlignmentFlag.AlignHCenter
+            r = QRectF(x if i == 0 else x - 120 if i == 4 else x - 60, h + 4, 120, 18)
+            p.drawText(r, a | Qt.AlignmentFlag.AlignVCenter, rel(self.win, t))
+        p.setPen(QPen(QColor(c['ac']), 1.8))
+        last = None
+        for t, v, _s in S:
+            q = self.xy(t, v, sc)
+            if last is not None:
+                p.drawLine(last, QPointF(q.x(), last.y()))
+                p.drawLine(QPointF(q.x(), last.y()), q)
+            last = q
+        if len(S) == 1:
+            p.setBrush(QColor(c['ac']))
+            p.drawEllipse(last, 3, 3)
+        wc = QColor(c['wa'])
+        for w in e['w']:
+            x = self.xy(w[0], lo, sc).x()
+            p.setPen(QPen(wc, 1.2, Qt.PenStyle.DashLine))
+            p.drawLine(QPointF(x, self.M_T), QPointF(x, h))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(wc)
+            p.drawPolygon(QPolygonF([QPointF(x - 5, self.M_T - 8), QPointF(x + 5, self.M_T - 8), QPointF(x, self.M_T)]))
+        p.end()
+
+    def near(self, pos):
+        """The sample or write under the mouse: (text, packet number)."""
+        e = self.e
+        if not e or not (e['s'] or e['w']):
+            return None
+        sc = self.scale()
+        best, bd = None, 8.0
+        for w in e['w']:
+            d = abs(self.xy(w[0], sc[3], sc).x() - pos.x())
+            if d < bd:
+                best, bd = (f'{rel(self.win, w[0])}: {w[3]} wrote {w[1]}', w[2]), d
+        if best:
+            return best
+        bd = 30.0
+        for t, v, s in sc[0]:
+            q = self.xy(t, v, sc)
+            d = math.hypot(q.x() - pos.x(), q.y() - pos.y())
+            if d < bd:
+                best, bd = (f'{rel(self.win, t)}: {s[1]}', s[3]), d
+        return best
+
+    def mouseMoveEvent(self, ev):
+        n = self.near(ev.position())
+        self.setToolTip((n[0] + '\nDouble-click to see this packet') if n else '')
+
+    def mouseDoubleClickEvent(self, ev):
+        n = self.near(ev.position())
+        if n:
+            self.win.go_packets(f'no == {n[1]}')
+
+
+class PointsView(BaseView):
+    key, title = 'h', 'Point history'
+
+    def __init__(self, win):
+        super().__init__(win)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 16, 24, 12)
+        v.setSpacing(10)
+        self.top = QHBoxLayout()
+        v.addLayout(self.top)
+        v.addWidget(hint('Every point whose value appears in the capture, from COV notifications and writes. Pick one to see its '
+                         'graph; orange markers are writes. A point that is only polled with Read Property is not listed. '
+                         'Double-click a row, or a spot on the graph, to see the packets.'))
+        row = QHBoxLayout()
+        row.addWidget(QLabel('Show'))
+        self.kind = QComboBox()
+        self.kind.addItem('Present value', 'pv')
+        self.kind.addItem('Every property', 'all')
+        self.kind.addItem('Written points', 'w')
+        row.addWidget(self.kind)
+        self.q = QLineEdit()
+        self.q.setPlaceholderText('Search address, point or name')
+        self.q.setClearButtonEnabled(True)
+        self.q.setMaximumWidth(320)
+        row.addWidget(self.q)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.tbl = Table(['Device', 'Point', 'Property', 'Updates', 'Changes', 'Low', 'High', 'Latest', 'Writes'])
+        self.tbl.rowActivated.connect(self.go)
+        self.tbl.itemSelectionChanged.connect(self.picked)
+        v.addWidget(self.tbl, 3)
+        self.chart = PointChart(win)
+        v.addWidget(self.chart, 2)
+        self.R = []
+        self.kind.currentIndexChanged.connect(self.refresh)
+        self.q.textChanged.connect(self.refresh)
+
+    def rows(self):
+        win = self.win
+        km = C.kid_map(win.FD)
+        K, Q = self.kind.currentData(), self.q.text().lower()
+        R = []
+        for e in win.FD.pts or []:
+            if (K == 'pv' and e['prop'] != 'present-value') or (K == 'w' and not e['w']):
+                continue
+            if Q and Q not in f"{who(win, e['key'], km)} {point_label(win, e, km)} {e['prop']}".lower():
+                continue
+            R.append(e)
+        return R
+
+    def refresh(self):
+        win = self.win
+        L = win.FD.pts or []
+        while self.top.count():
+            w = self.top.takeAt(0).widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        self.top.addWidget(summary_row('Point values over time' if L else 'No point values in this capture',
+                                       [(C.pl(len({(e['key'], e['obj']) for e in L}), 'point'), 'NOTE'),
+                                        (C.pl(len(win.FD.vc or []), 'value change'), 'NOTE')] if L else []))
+        sel = self.current()
+        keep = (sel['key'], sel['obj'], sel['prop']) if sel else None
+        self.R = R = self.rows()[:3000]
+        km = C.kid_map(win.FD)
+        c = colors()
+        rows, data = [], []
+        for e in R:
+            rows.append([who(win, e['key'], km), point_label(win, e, km), e['prop'], len(e['s']) or '', e['chg'] or '',
+                         '' if e['lo'] is None else f"{e['lo']:.6g}", '' if e['hi'] is None else f"{e['hi']:.6g}",
+                         e['s'][-1][1] if e['s'] else e['w'][-1][1], (len(e['w']), {'fg': c['wa'], 'bold': True}) if e['w'] else ''])
+            data.append(f'cov && sender == "{e["key"]}" && object == "{e["obj"]}"' if e['s'] else
+                        f'write && receiver == "{e["key"]}"')
+        self.tbl.fill(rows, data)
+        i = next((i for i, e in enumerate(R) if keep == (e['key'], e['obj'], e['prop'])), 0 if R else -1)
+        if i >= 0:
+            self.tbl.selectRow(i)
+        self.chart.show_point(self.R[i] if i >= 0 else None)
+        self._stale = False
+
+    def current(self):
+        i = self.tbl.currentRow()
+        return self.R[i] if 0 <= i < len(self.R) else None
+
+    def picked(self):
+        self.chart.show_point(self.current())
+
+    def formats(self):
+        w = self.win
+
+        def html():
+            return html_table(['Device', 'Point', 'Property', 'Updates', 'Changes', 'Low', 'High'],
+                              [[esc(e['key']), esc(point_label(w, e)), esc(e['prop']), len(e['s']), e['chg'],
+                                '' if e['lo'] is None else e['lo'], '' if e['hi'] is None else e['hi']] for e in self.rows()])
+
+        def csv():
+            o = []
+            for e in self.rows():
+                pt = point_label(w, e)
+                o += [[C.tofixed(s[0] - w.T0, 3), s[3], e['key'], pt, e['prop'], s[1], 'reported'] for s in e['s']]
+                o += [[C.tofixed(x[0] - w.T0, 3), x[2], e['key'], pt, e['prop'], x[1], 'written by ' + x[3]] for x in e['w']]
+            return csv_text('Time (s),Packet,Device,Point,Property,Value,How', sorted(o, key=lambda r: float(r[0])))
+        return PageView.savef(self, 'Point history', html, csv)
+
+
+# ================================================================== alarms --
+class AlarmsView(BaseView):
+    key, title = 'e', 'Alarms & events'
+
+    def __init__(self, win):
+        super().__init__(win)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 16, 24, 12)
+        v.setSpacing(12)
+        self.top = QHBoxLayout()
+        v.addLayout(self.top)
+        v.addWidget(hint('Every alarm or event notification in the capture: which point, what state it moved to and whether anyone '
+                         'acknowledged it. An acknowledgement sent outside the capture cannot be seen. Double-click a row to see the packet.'))
+        row = QHBoxLayout()
+        row.addWidget(QLabel('Show'))
+        self.f = QComboBox()
+        for t, k in [('Everything', 'all'), ('Alarms only', 'alarm'), ('Waiting for an acknowledgement', 'wait')]:
+            self.f.addItem(t, k)
+        row.addWidget(self.f)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.tbl = Table(['Time', 'From', 'Point', 'Event', 'State', 'Priority', 'Message', 'Acknowledged'])
+        self.tbl.rowActivated.connect(self.go)
+        v.addWidget(self.tbl, 1)
+        self.f.currentIndexChanged.connect(self.refresh)
+
+    @staticmethod
+    def is_alarm(a):
+        return a['notify'] == 'alarm' or a['now'] not in ('', 'normal') or a['was'] not in ('', 'normal')
+
+    def rows(self):
+        L = self.win.FD.al or []
+        K = self.f.currentData()
+        return [a for a in L if K == 'all' or (K == 'alarm' and self.is_alarm(a)) or (K == 'wait' and a['need'] and not a['ack'])]
+
+    def refresh(self):
+        win = self.win
+        L = win.FD.al or []
+        while self.top.count():
+            w = self.top.takeAt(0).widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        wait = sum(1 for a in L if a['need'] and not a['ack'])
+        pills = [(C.pl(len(L), 'notification'), 'NOTE')] if L else []
+        if wait:
+            pills.append((f'{wait} not acknowledged', 'WARNING'))
+        self.top.addWidget(summary_row('Alarms and events' if L else 'No alarms or events in this capture', pills))
+        km = C.kid_map(win.FD)
+        c = colors()
+        rows, data = [], []
+        for a in self.rows():
+            bad = a['now'] not in ('', 'normal')
+            nm = win.labels.p(a['dev'].replace('device ', ''), a['obj'])
+            ack = (f"yes, {rel(win, a['ack']['t'])}", {'fg': c['no']}) if a['ack'] else \
+                ('waiting', {'fg': c['wa'], 'bold': True}) if a['need'] else ('not needed', {'fg': c['mu']})
+            rows.append([rel(win, a['t']), who(win, a['from'], km), a['obj'] + (f' “{nm}”' if nm else ''), a['type'],
+                         (f"{a['was']} → {a['now']}", {'fg': c['se'] if bad else c['mu'], 'bold': bad}), a['pri'], a['msg'], ack])
+            data.append(f"no == {a['no']}")
+        self.tbl.fill(rows, data)
+        self._stale = False
+
+    def formats(self):
+        w = self.win
+        head = ['Time (s)', 'Packet', 'From', 'Point', 'Event', 'Was', 'Now', 'Priority', 'Message', 'Acknowledged']
+
+        def line(a):
+            return [C.tofixed(a['t'] - w.T0, 3), a['no'], a['from'], a['obj'], a['type'], a['was'], a['now'], a['pri'], a['msg'],
+                    ('by ' + str(a['ack']['by'])) if a['ack'] else 'waiting' if a['need'] else 'not needed']
+
+        def html():
+            return html_table(head, [[esc(x) for x in line(a)] for a in self.rows()])
+        return PageView.savef(self, 'Alarms and events', html, lambda: csv_text(','.join(head), [line(a) for a in self.rows()]))
+
+
+# =========================================================== site profiles --
+class SitesDialog(QDialog):
+    """Saved sites: remember what a site looks like, then check a later visit against it."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle('Site profiles')
+        self.resize(760, 560)
+        v = QVBoxLayout(self)
+        v.addWidget(hint('Save the devices and networks in this capture under a site name. On your next visit, open a new capture '
+                         'and compare it with the saved site to see what is new, missing or changed.'))
+        row = QHBoxLayout()
+        self.site = QComboBox()
+        self.site.setMinimumWidth(280)
+        row.addWidget(self.site, 1)
+        self.b_cmp = QPushButton('Compare with this capture')
+        self.b_del = QPushButton('Delete site')
+        row.addWidget(self.b_cmp)
+        row.addWidget(self.b_del)
+        v.addLayout(row)
+        row = QHBoxLayout()
+        self.name = QLineEdit()
+        self.name.setPlaceholderText('Site name')
+        self.notes = QLineEdit()
+        self.notes.setPlaceholderText('Notes (optional)')
+        self.b_save = QPushButton('Save this capture as a site')
+        row.addWidget(self.name, 1)
+        row.addWidget(self.notes, 2)
+        row.addWidget(self.b_save)
+        v.addLayout(row)
+        self.out = QTextBrowser()
+        link_finds(self.out)
+        v.addWidget(self.out, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+        self.b_cmp.clicked.connect(self.compare)
+        self.b_del.clicked.connect(self.delete)
+        self.b_save.clicked.connect(self.save)
+        self.site.currentIndexChanged.connect(lambda _i: self.show_site())
+        self.load()
+
+    def sites(self):
+        return dict(self.win.store.get('bi_sites') or {})
+
+    def load(self, pick=None):
+        S = self.sites()
+        self.site.blockSignals(True)
+        self.site.clear()
+        for k in sorted(S, key=str.lower):
+            self.site.addItem(k, k)
+        if pick in S:
+            self.site.setCurrentIndex(self.site.findData(pick))
+        self.site.blockSignals(False)
+        self.b_cmp.setEnabled(bool(S) and bool(self.win.ac))
+        self.b_del.setEnabled(bool(S))
+        self.b_save.setEnabled(bool(self.win.FD.dv))
+        self.show_site()
+
+    def show_site(self):
+        p = self.sites().get(self.site.currentData())
+        if not p:
+            self.out.setHtml('<p>No sites saved yet. Open a capture, type a site name and press Save.</p>')
+            return
+        self.out.setHtml(f"<h3>{esc(p['name'])}</h3><p>Saved {esc(p['when'])}: {C.pl(len(p['devs']), 'device')}, "
+                         f"{C.pl(len(p['nets']), 'network')}.</p>" + (f"<p>{esc(p['notes'])}</p>" if p['notes'] else ''))
+
+    def save(self):
+        n = self.name.text().strip()
+        if not n:
+            return self.win.toast('Type a site name first')
+        S = self.sites()
+        S[n] = bi_points.profile(self.win.FD, n, self.notes.text().strip())
+        self.win.store.set('bi_sites', S)
+        self.name.clear()
+        self.notes.clear()
+        self.load(n)
+
+    def delete(self):
+        S = self.sites()
+        S.pop(self.site.currentData(), None)
+        self.win.store.set('bi_sites', S or None)
+        self.load()
+
+    def compare(self):
+        p = self.sites().get(self.site.currentData())
+        if p:
+            self.out.setHtml(site_diff_html(self.win, p))
+
+
+def site_diff_html(win, p):
+    R = bi_points.profile_diff(p, win.FD)
+    hl = win.labels.hl
+
+    def sec(t, items):
+        return f'<h3>{t} ({len(items)})</h3>' + ('<ul>' + ''.join(f'<li>{x}</li>' for x in items) + '</ul>' if items else '<p>None.</p>')
+
+    def dv(d):
+        x = ' '.join(s for s in (d['name'], d['model']) if s)
+        return f"{hl('Device ' + str(d['id']))} at {hl(d['key'])}" + (f' {esc(x)}' if x else '')
+    return (f"<p><b>{esc(p['name'])}</b> saved {esc(p['when'])}, compared with <b>{esc(win.ac.n)}</b>. {R['same']} of "
+            f"{C.pl(len(p['devs']), 'saved device')} unchanged. A device that stayed silent during this capture shows as missing.</p>" +
+            sec('New devices', [dv(d) for d in R['new']]) + sec('Missing devices', [dv(d) for d in R['gone']]) +
+            sec('Changed address', [f"{hl('Device ' + str(x['id']))}: {hl(x['was'])} → {hl(x['now'])}" for x in R['moved']]) +
+            sec('Changed firmware', [f"{hl('Device ' + str(x['id']))}: {esc(x['was'])} → {esc(x['now'])}" for x in R['fw']]) +
+            sec('New networks', [hl(f'network {n}') for n in R['newN']]) + sec('Networks no longer seen', [hl(f'network {n}') for n in R['goneN']]))
+
+
+# =============================================================== PDF report --
+class SiteReportDialog(QDialog):
+    """The details printed at the top of the PDF site report."""
+    FIELDS = (('customer', 'Customer'), ('site', 'Site'), ('tech', 'Technician'))
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.setWindowTitle('Site report')
+        self.resize(480, 300)
+        o = win.store.get('bi_report') or {}
+        form = QFormLayout(self)
+        self.ed = {}
+        for k, t in self.FIELDS:
+            self.ed[k] = QLineEdit(o.get(k, ''))
+            form.addRow(t, self.ed[k])
+        self.notes = QPlainTextEdit()
+        self.notes.setPlaceholderText('Work done on this visit (optional)')
+        form.addRow('Notes', self.notes)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        form.addRow(bb)
+
+    def info(self):
+        o = {k: e.text().strip() for k, e in self.ed.items()}
+        o['notes'] = self.notes.toPlainText().strip()
+        return o
+
+
+def pdf_report(win, info):
+    """The site report as PDF bytes (US Letter)."""
+    buf = QBuffer()
+    buf.open(QBuffer.OpenModeFlag.WriteOnly)
+    w = QPdfWriter(buf)
+    w.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
+    w.setPageMargins(QMarginsF(16, 16, 16, 16), QPageLayout.Unit.Millimeter)
+    w.setResolution(120)
+    w.setTitle('BACnet site report')
+    w.setCreator('BACnet Inspector')
+    d = QTextDocument()
+    d.setDefaultFont(QFont('Segoe UI', 10))
+    d.setHtml(html_report(win, info))
+    d.setPageSize(QSizeF(w.width(), w.height()))
+    d.print_(w)
+    del w
+    buf.close()
+    return bytes(buf.data())
 
 
 # ============================================================ names dialog --
@@ -2023,5 +2543,6 @@ HELP = {
 
 def make(k, win):
     cls = {'f': FindingsView, 'd': DevicesView, 'w': ChangesView, 't': TrafficView, 's': ResponseView, 'o': OnlineView,
-           'g': MapView, 'a': AvailIdsView, 'n': AvailNetsView, 'm': MstpView, 'b': BusSpeedView, 'c': CompareView}[k]
+           'g': MapView, 'a': AvailIdsView, 'n': AvailNetsView, 'm': MstpView, 'b': BusSpeedView, 'c': CompareView,
+           'h': PointsView, 'e': AlarmsView}[k]
     return cls(win)

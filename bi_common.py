@@ -84,6 +84,10 @@ class Labels:
     def n(self, n):
         return self.store.label('n', n)
 
+    def p(self, dev, obj):
+        """The imported name of a point; a name without a device applies to every device."""
+        return self.store.label('p', f'{dev}|{obj}') or self.store.label('p', f'*|{obj}')
+
     def lz(self, s):
         """Plain text: add “name” after 'device 123' and 'network 5'."""
         s = re.sub(r'\b([Dd]evice) (\d+)\b', lambda m: m.group(0) + (f' “{self.d(m.group(2))}”' if self.d(m.group(2)) else ''), s)

@@ -177,6 +177,14 @@ Sending is not possible on an MS/TP serial connection (a listener must stay sile
 receives also appears in the Live capture tab, so you can watch the conversation.</p>
 """)
 
+ch('long', 'Long capture', 'Captures', """
+<p>Capture &gt; <b>Long capture…</b> saves everything to a folder while the live capture runs, so you can leave it
+overnight to catch a fault that comes and goes. A new .pcap file starts every few minutes (30 by default) and the oldest
+are removed once there are more than you chose to keep. <b>problems.txt</b> in the same folder lists every alert with its
+time. Check the disk has room: each file holds all the traffic of its period. The Live capture tab itself keeps only the
+newest 100,000 packets; the files keep the rest.</p>
+""")
+
 ch('packets', 'The packet list', 'Captures', f"""
 <p>The <b>Packets</b> page lists every message in the capture, one per row, with the decoded details of the selected
 packet underneath.</p>
@@ -344,7 +352,26 @@ which value to which point, at what priority) and <b>commands</b> – restarts, 
 deleted. The <b>Result</b> column shows whether the device accepted it.</p>
 <p>Use <b>Show</b> to see Everything, only Point writes, only Restarts and commands, or only the Refused ones, and the
 search box to find an address, point or value. Double-click a row to see the packet.</p>
+<p><b>Value changes (COV)</b> under Show lists points changing by themselves instead: each time a COV notification
+reported a different value, with the old and new value.</p>
 {note('Useful when something in the building changed and nobody knows who did it: the From column shows which PC or controller sent the change.')}
+""")
+
+ch('history', 'Point history', 'Analyse a capture', """
+<p><b>Point history</b> lists every point whose value appears in the capture, with how often it updated, how often it
+changed, and its low, high and latest value. Pick a point to see its graph. Orange markers are writes: hover to see who
+wrote what, and double-click the graph or a row to see the packets.</p>
+<p>The values come from COV notifications and writes. A point that is only polled with Read Property is not listed.</p>
+<p>Under <b>Show</b> choose the present value, every property, or only points that were written. Edit &gt; <b>Import point
+names…</b> reads a CSV with columns Device, Object and Name, and the names then appear here, on Changes and on Alarms.
+Object can be written AI1, AV-3 or analog-input 1. Leave Device blank for a name that applies to every device.</p>
+""")
+
+ch('alarms', 'Alarms & events', 'Analyse a capture', """
+<p><b>Alarms &amp; events</b> lists every event notification in the capture: the point, the event type, the state it
+moved from and to, the priority, the message, and whether it was acknowledged. Show can narrow it to real alarms, or to
+those still waiting for an acknowledgement. An acknowledgement sent outside the capture cannot be seen, so an old alarm
+may show as waiting. Double-click a row to see the packet.</p>
 """)
 
 ch('traffic', 'Traffic', 'Analyse a capture', f"""
@@ -361,6 +388,9 @@ the COV increment is probably too small.</li>
 """)
 
 ch('response', 'Response times & errors', 'Analyse a capture', """
+<p><b>Device health</b> at the top scores each device out of 100 from unanswered requests, answer time and errors, worst
+first, with the reasons. 85 or more is Good, 60 or more is Fair, lower is Poor. It only covers devices that were asked
+something during the capture.</p>
 <p>This page matches each request to its answer and measures how long each device takes to reply.</p>
 <ul>
 <li><b>Typical</b>, <b>Slowest 5%</b> and <b>Worst</b> reply times per device, and how many requests got <b>No
@@ -439,6 +469,7 @@ port.</p>
 """)
 
 ch('compare', 'Compare captures', 'Analyse a capture', """
+<p>Use this as a before and after check: the top line counts the problems fixed, still there and new.</p>
 <p><b>Compare captures</b> lines up two open captures – typically <b>Before</b> and <b>After</b> a change – and shows
 what is different:</p>
 <ul>
@@ -593,6 +624,13 @@ and category pages, can be exported as Excel or CSV, and is also saved to <i>wri
 <p>Only the present value can be written. Restarts, configuration changes and other services are never sent.</p>
 """)
 
+ch('sites', 'Site profiles', 'Everyday tools', """
+<p>Capture &gt; <b>Site profiles…</b> remembers a site. Open a capture, type a site name and press <b>Save this capture
+as a site</b>: its devices, addresses, firmware and networks are kept on this computer. On a later visit, open a new
+capture, pick the site and press <b>Compare with this capture</b> to see what is new, missing or changed. A device that
+stayed silent during the capture shows as missing, so capture for long enough or run a Who-Is first.</p>
+""")
+
 ch('names', 'Names and labels', 'Everyday tools', """
 <p>Give device IDs and network numbers your own names – “AHU-1”, “Roof trunk” – and they appear next to the numbers on
 every page and in reports.</p>
@@ -623,6 +661,11 @@ sending a short extract.</td></tr>
 <h3>Report</h3>
 <p>File &gt; <b>Export report…</b> writes a plain-English report of the whole capture – summary, findings, devices,
 networks and more – as a web page or text file. Ideal for a job report or to send to a colleague.</p>
+""")
+
+ch('sitereport', 'Site report (PDF)', 'Everyday tools', """
+<p>File &gt; <b>Site report (PDF)…</b> asks for the customer, site, technician and the work done, then saves a PDF with
+the findings and what to do about them, suggested IDs, devices, device health and alarms, ready to hand over.</p>
 """)
 
 ch('palette', 'Search everything (Ctrl+K)', 'Everyday tools', f"""

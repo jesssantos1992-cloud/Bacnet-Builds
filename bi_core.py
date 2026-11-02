@@ -136,6 +136,7 @@ RIS = ['cold start (full restart)', 'warm start (restart)', 'start backup', 'end
 PN = {12: 'sw', 28: 'desc', 44: 'fw', 58: 'loc', 70: 'model', 77: 'name', 121: 'vendor', 372: 'serial'}
 
 from bi_vendors import VN  # noqa: E402  (BACnet vendor ID -> manufacturer)
+import bi_points  # noqa: E402
 __all__ = ['VN']          # re-exported: other modules use C.VN (keeps the import from looking unused)
 
 # ------------------------------------------------------- JS-compatible text --
@@ -668,7 +669,7 @@ class Pk:
     d = b''
     tree = None
     fl = bad = exp = mt = o = v = nak = dk = dn = sn = sa = key = adv = rb = nn = None
-    iam = whois = rq = rs = sig = wr = cov = rp = er = val = names = bm = note = wrx = ob = None
+    iam = whois = rq = rs = sig = wr = cov = rp = er = val = names = bm = note = wrx = ob = cv = al = None
 
 
 _PAD = b'\0' * 64
@@ -792,9 +793,11 @@ def npdu(d, L, o, r, tree):
                 covdec(d, i + 2, r)
             except IndexError:
                 pass
-            cv = _cov_text(d, L, i)
+            cv = _cov_text(d, L, i, r)
             if cv:
                 s = f'{nm}: {cv}'
+        elif v == 3:
+            _alarm(d, L, i, r, 'event')
     elif t == 0:
         sv = d[i + 5] if seg else d[i + 3]
         k = i + 6 if seg else i + 4
@@ -820,7 +823,9 @@ def npdu(d, L, o, r, tree):
                 covdec(d, k, r)
             except IndexError:
                 pass
-            x = _cov_text(d, L, i) or x
+            x = _cov_text(d, L, i, r) or x
+        elif sv in (0, 2):
+            _alarm(d, L, i, r, 'ack' if sv == 0 else 'event')
         s = f"{nm} request{': ' + x if x else ''} (#{inv})"
         e = f'Request #{inv}: {ds}. The device should answer with a response marked #{inv}.'
     elif 2 <= t <= 7:
@@ -873,13 +878,22 @@ def npdu(d, L, o, r, tree):
     return s
 
 
-def _cov_text(d, L, i):
-    """The changed values of a COV notification, for the Info column."""
+def _cov_text(d, L, i, r):
+    """The changed values of a COV notification, for the Info column; r.cv keeps them for Point history."""
     try:
         import bi_svc
-        return bi_svc.cov_summary(d, L, i)
+        r.cv = []
+        return bi_svc.cov_summary(d, L, i, r.cv)
     except Exception:
         return ''
+
+
+def _alarm(d, L, i, r, kind):
+    try:
+        import bi_svc
+        r.al = bi_svc.event_fields(d, L, i, kind)
+    except Exception:
+        r.al = None
 
 
 def v6s(a) -> str:
@@ -1224,6 +1238,7 @@ def _fields(T0):
         'reach': lambda r: list(r.adv) if r.adv is not None else [],
         'announcer': lambda r: r.o if r.adv is not None else None, 'write': lambda r: 1 if r.wr else 0,
         'command': lambda r: 1 if r.wr and r.wr['sev'] else 0, 'cov': lambda r: 1 if r.cov else 0,
+        'alarm': lambda r: 1 if r.al else 0,
         'error': lambda r: 1 if r.er else 0, 'bookmark': lambda r: 1 if r.bm else 0, 'note': lambda r: r.note or '',
         'sender': lambda r: r.key or r.src, 'receiver': lambda r: r.dk or r.dst, 'service': lambda r: r.rs,
         'object': lambda r: [r.ob, r.wr['obj'] if r.wr else None, r.cov['obj'] if r.cov else None],
@@ -1527,7 +1542,7 @@ def util(o, baud, dur):
 # --------------------------------------------------------------- analysis --
 class Analysis(list):
     """The findings list, with every other analysis result as attributes (like the original FD)."""
-    er = rb = tf = pairs = covs = wr = trk = tEnd = sp = sl = dv = via = adv = gws = nm = nets = None
+    er = rb = tf = pairs = covs = wr = trk = tEnd = sp = sl = dv = via = adv = gws = nm = nets = pts = vc = al = hl = None
 
 
 def _fix_why(w):
@@ -2133,6 +2148,9 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                           'Check the subscriber: does it really need every update?', 'Capture again to confirm it has settled.']})
     erl = sorted(erm.values(), key=lambda e: -e['n'])
     out.er = [{**e, 'svc': list(e['svc']), 'fix': _fix_why(e['why'])} for e in erl]
+    out.pts = bi_points.points(P)
+    out.vc = bi_points.value_changes(out.pts)
+    out.al = bi_points.alarms(P)
     big = [e for e in out.er if e['n'] >= 5]
     if big:
         out.append({'s': 'WARNING', 't': f"{name_of(big[0]['who'])} keeps refusing requests" if len(big) == 1 else f'{len(big)} devices keep refusing or failing requests',
@@ -2218,6 +2236,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
     order = {'SERIOUS': 0, 'WARNING': 1, 'NOTE': 2}
     out.sort(key=lambda f: order[f['s']])
     out.sp, out.sl, out.dv, out.via, out.adv, out.gws, out.nm, out.nets = sp, sl, list(dv.values()), via, adv, gws, nmap, nets
+    out.hl = bi_points.health(out)
     return out
 
 
@@ -2435,10 +2454,13 @@ def compare(FA, FB):
         o, m = sd(ga, gb), sd(gb, ga)
         if ga and gb and (o or m):
             R['gwN'].append({'n': n, 'from': o, 'to': m})
-    ta = {f['t'] for f in FA}
-    tb = {f['t'] for f in FB}
-    R['newF'] = [f for f in FB if f['t'] not in ta]
-    R['fixedF'] = [f for f in FA if f['t'] not in tb]
+    # the numbers in a title change between captures ('3 points are …'): it is still the same problem
+    same = lambda f: re.sub(r'\d+%?', '#', f['t']) if not re.search(r'[Dd]evice ID|network \d|MAC \d', f['t']) else f['t']  # noqa: E731
+    ta = {same(f) for f in FA}
+    tb = {same(f) for f in FB}
+    R['newF'] = [f for f in FB if same(f) not in ta]
+    R['fixedF'] = [f for f in FA if same(f) not in tb]
+    R['sameF'] = [f for f in FB if same(f) in ta]
     R['na'], R['nb'], R['fa'], R['fb'] = len(FA.dv or []), len(FB.dv or []), len(FA), len(FB)
     return R
 

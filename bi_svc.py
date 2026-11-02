@@ -7,6 +7,7 @@ apdu_rows(d, L, i) returns [[level, text], ...] with level 1 directly under "BAC
 """
 from __future__ import annotations
 
+import re
 import struct
 
 import bi_core as C
@@ -494,12 +495,28 @@ def apdu_rows(d, L, i):
         return [[1, '(the message could not be decoded)']]
 
 
-def cov_summary(d, L, i):
-    """'analog-input 1: present-value = 72.5, status-flags = none set' for a COV notification (Info column)."""
+def cov_summary(d, L, i, into=None):
+    """'analog-input 1: present-value = 72.5, status-flags = none set' for a COV notification (Info column).
+    The (property, value) pairs are appended to `into`."""
     try:
         _, ctx = _decode(d, L, i)
     except (IndexError, ValueError, struct.error):
         return ''
     pairs = ctx.get('pairs') or []
+    if into is not None:
+        into.extend((_prop(p).rsplit(' (', 1)[0] if p is not None else '', str(v)) for p, v in pairs)
     vals = ', '.join(f'{(_prop(p).rsplit(" (", 1)[0]) if p is not None else "value"} = {v}' for p, v in pairs[:3])
     return (ctx.get('obj') or '') + (': ' + vals if vals else '') + (' …' if len(pairs) > 3 else '')
+
+
+def event_fields(d, L, i, kind):
+    """The labelled fields of an event notification or an acknowledgement, for the Alarms view."""
+    out = {'kind': kind}
+    try:
+        for lvl, text in _decode(d, L, i)[0]:
+            if lvl == 1 and ': ' in text:
+                k, v = text.split(': ', 1)
+                out.setdefault(k, re.sub(r' \(\d+\)$', '', v))
+    except (IndexError, ValueError, struct.error):
+        pass
+    return out
