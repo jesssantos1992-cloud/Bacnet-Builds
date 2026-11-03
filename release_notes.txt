@@ -1,7 +1,8 @@
-- New look in ACCS colours: charcoal sidebar with the ACCS logo, ACCS green throughout.
-- Reports and the PDF site report carry the ACCS name and logo.
-- Findings opens with a row of numbers (packets, devices, problems, alarms, value changes, devices to check); click one to open it.
-- Point history graph: hover to read the value at any time, drag to zoom in, right-click to zoom out.
-- Tables size their columns better, and short lists no longer fill the page with empty space.
-- Response times: the heading now agrees with the device health scores.
-- Every analysis page shows how long the capture is, with its start and end time; Findings and Packets show it too.
+- Light and dark mode fixed: the title bar now always matches the theme, and the sidebar is light in light mode.
+- Overrides: Point history shows which priority holds each written point, and Findings warns about points left overridden at priority 1 to 8.
+- BBMD checks: Findings now spots foreign devices that let their registration run out, and broadcasts arriving twice through two BBMDs.
+- The network map is now in the web report and the PDF site report.
+- Export a device's points as an EDE file, the point list other BACnet tools import.
+- Help > Open sample capture: a made-up building to try every page without a site.
+- Changes explains an empty list (for example, a switched network only shows this PC's own writes).
+- Mac: a Download update button gets the new version.

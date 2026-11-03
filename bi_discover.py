@@ -1009,7 +1009,10 @@ class DiscoverView(QWidget):
         r.addWidget(b2)
         if e and e.get('objs'):
             b3 = QPushButton('Export points…')
-            b3.clicked.connect(lambda: self.save_csv(f"device-{e['id']}-points.csv", self.csv_points(e)))
+            mx = QMenu(b3)
+            mx.addAction('Excel or spreadsheet…', lambda: self.save_csv(f"device-{e['id']}-points.csv", self.csv_points(e)))
+            mx.addAction('EDE file (for other BACnet tools)…', lambda: self.save_ede(f"device-{e['id']}-EDE.csv", [e]))
+            b3.setMenu(mx)
             r.addWidget(b3)
         ba = QPushButton('Active alarms')
         ba.setToolTip('Ask the device which of its points are in alarm (read-only)')
@@ -1479,6 +1482,7 @@ class DiscoverView(QWidget):
         ip = en['ip'] or (ex and ex.get('ip')) or ''
         m.addAction('Copy IP address', lambda: QApplication.clipboard().setText(ip)).setEnabled(bool(ip))
         m.addAction('Export points (.csv)', lambda: self.save_csv(f"device-{en['id']}-points.csv", self.csv_points(ex))).setEnabled(bool(ex and ex.get('objs')))
+        m.addAction('Export points as EDE…', lambda: self.save_ede(f"device-{en['id']}-EDE.csv", [ex])).setEnabled(bool(ex and ex.get('objs')))
         m.addSeparator()
 
         def forget():
@@ -1596,6 +1600,39 @@ class DiscoverView(QWidget):
         return csv_text('Device ID,Device name,Object type,Instance,Object name,Present value,Units,Description',
                         [[d['id'], d.get('name') or '', E.sd_ty(o['ty']), o['inst'], o['name'], o['val'], o['u'], o['desc']] for o in d.get('objs') or []])
 
+    @staticmethod
+    def ede_text(devs, project='BACnet site'):
+        """The points of these devices as an EDE file (Engineering Data Exchange, B.I.G.-EU layout 2.3): the
+        semicolon-separated point list that other BACnet tools and engineers import."""
+        def cell(v):
+            return str(v if v is not None else '').replace(';', ',').replace('\r', ' ').replace('\n', ' ')
+        L = ['#Engineering-Data-Exchange - B.I.G.-EU', f'PROJECT_NAME;{cell(project)}', 'VERSION_OF_REFERENCEFILE;1',
+             f"TIMESTAMP_OF_LAST_CHANGE;{time.strftime('%d.%m.%Y')}", 'AUTHOR_OF_LAST_CHANGE;BACnet Inspector', 'VERSION_OF_LAYOUT;2.3',
+             '#mandatory;mandatory;mandatory;mandatory;mandatory;optional;optional;optional;optional;optional;optional;optional;'
+             'optional;optional;optional;optional',
+             '# keyname;device obj.-instance;object-name;object-type;object-instance;description;present-value-default;'
+             'min-present-value;max-present-value;settable;supports COV;hi-limit;low-limit;state-text-reference;unit-code;'
+             'vendor-specific-address']
+        for d in devs:
+            for o in d.get('objs') or []:
+                key = f"{d['id']}_{E.sd_ty(o['ty'])}_{o['inst']}".replace(' ', '')
+                L.append(';'.join(cell(x) for x in [key, d['id'], o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}", o['ty'], o['inst'],
+                                                    o['desc'], '', '', '', '', '', '', '', '', '', '']))
+        return '\r\n'.join(L) + '\r\n'
+
+    def save_ede(self, name, devs):
+        p, _ = QFileDialog.getSaveFileName(self, 'Save EDE file', name, 'EDE file (*.csv)')
+        if not p:
+            return
+        if not p.lower().endswith('.csv'):
+            p += '.csv'
+        try:
+            with open(p, 'w', encoding='utf-8', newline='') as f:
+                f.write(self.ede_text(devs))
+            self.win.toast('Saved ' + p)
+        except OSError as e:
+            self.win.toast(f'Save failed: {e.strerror}')
+
     def csv_wlog(self):
         return csv_text('Time,Device,Device name,Point,Value,Priority,Result,Read back,Highest active priority',
                         [[time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(w['t'] / 1000)), w['dev'], w['dname'],
@@ -1632,7 +1669,9 @@ class DiscoverView(QWidget):
                        html_table(['Device ID', 'Name', 'Address', 'Vendor', 'Model', 'Status'], rows))
         return [('html', 'Web page – the discovered devices (*.html)', 'html', html),
                 ('csv', 'Spreadsheet – one row per device (*.csv)', 'csv', lambda: '﻿' + self.csv_devices()),
-                ('inventory', 'Site inventory – devices with point counts (*.csv)', 'csv', lambda: '﻿' + self.csv_inventory())]
+                ('inventory', 'Site inventory – devices with point counts (*.csv)', 'csv', lambda: '﻿' + self.csv_inventory()),
+                ('ede', 'EDE file – every point read, for other BACnet tools (*.csv)', 'csv',
+                 lambda: self.ede_text(sorted((d for d in self.ex.devs.values() if d.get('objs')), key=lambda d: d['id'])))]
 
 
 # ============================================================ dialogs --

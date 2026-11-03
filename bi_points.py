@@ -30,7 +30,8 @@ def number(v):
 def points(P):
     """Every point the capture shows a value for: {'key', 'dev', 'obj', 'prop', 's': samples, 'w': writes}.
     A sample is (time, value text, number or None, packet number). COV notifications carry the values; a
-    write is (time, value text, packet number, who wrote it)."""
+    write is (time, value text, packet number, who wrote it, priority or None). 'held' lists the priorities still
+    commanded at the end of the capture: (priority, value, who, time), highest priority (lowest number) first."""
     out = {}
 
     def at(key, dev, obj, prop):
@@ -53,16 +54,31 @@ def points(P):
             many = list(_WPM.finditer(w['val']))
             if w['svc'] == 'Write Property Multiple' and many:
                 for m in many:
-                    at(key, None, m.group(1), m.group(2))['w'].append((r.t, m.group(3).replace(' …', '').strip(), r.no, sender))
+                    at(key, None, m.group(1), m.group(2))['w'].append((r.t, m.group(3).replace(' …', '').strip(), r.no, sender, w['pri']))
             elif w['obj'] and w['prop']:
-                at(key, None, w['obj'], w['prop'])['w'].append((r.t, w['val'], r.no, sender))
+                at(key, None, w['obj'], w['prop'])['w'].append((r.t, w['val'], r.no, sender, w['pri']))
     L = [e for e in out.values() if e['s'] or e['w']]
     for e in L:
         e['chg'] = sum(1 for a, b in zip(e['s'], e['s'][1:]) if a[1] != b[1])
         nums = [x[2] for x in e['s'] if x[2] is not None]
         e['lo'], e['hi'] = (min(nums), max(nums)) if nums else (None, None)
+        e['held'] = held(e['w']) if e['prop'] == PV else []
     L.sort(key=lambda e: (e['prop'] != PV, -e['chg'], -len(e['s']), e['key'], e['obj']))
     return L
+
+
+def held(W):
+    """The priorities a list of writes leaves in control: the last write at each priority, unless it released it (NULL).
+    A write without a priority counts as priority 16, as BACnet does."""
+    last = {}
+    for w in W:
+        last[w[4] if w[4] is not None else 16] = w
+    return sorted((p, w[1], w[3], w[0]) for p, w in last.items() if not str(w[1]).strip().lower().startswith('null') and str(w[1]).strip())
+
+
+def held_text(e):
+    """'8 = 72.0' style summary of the priorities held, for a table cell."""
+    return ', '.join(f'{p} = {v}' for p, v, _, _ in e.get('held') or [])
 
 
 def value_changes(L):

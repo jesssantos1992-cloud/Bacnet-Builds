@@ -124,6 +124,10 @@ pick several files at once.</li>
 <li>In File Explorer, right-click a capture and choose <b>Open with &gt; BACnet Inspector</b> (offered when the option
 was ticked during installation). If the app is already open, the file opens as a new tab in the same window.</li>
 </ul>
+<h3>Sample capture</h3>
+<p>Help &gt; <b>Open sample capture</b> (or <b>Try the sample</b> on an empty page) opens a made-up building with a few
+problems planted in it: an override left in place, refused requests, an alarm, a foreign device that lets its BBMD
+registration lapse and broadcasts arriving twice. Use it to learn the pages without a site.</p>
 <h3>Tabs</h3>
 <p>Each file gets its own tab, so you can switch between captures without opening them again. Each tab keeps its own
 filter, scroll position and selected packet. Close a tab with its × or {k('Ctrl+W')}; the message at the bottom has an
@@ -354,10 +358,16 @@ deleted. The <b>Result</b> column shows whether the device accepted it.</p>
 search box to find an address, point or value. Double-click a row to see the packet.</p>
 <p><b>Value changes (COV)</b> under Show lists points changing by themselves instead: each time a COV notification
 reported a different value, with the old and new value.</p>
+<p>An empty list says why. Often nobody changed anything; on a switched network the PC also only sees writes it sends
+or receives itself, so capture on a mirrored (SPAN) switch port or on the workstation to see a front-end's writes.</p>
 {note('Useful when something in the building changed and nobody knows who did it: the From column shows which PC or controller sent the change.')}
 """)
 
 ch('history', 'Point history', 'Analyse a capture', """
+<p><b>Priority held</b> shows, for each point written in the capture, the priorities still in control at the end
+(for example <i>8 = active</i>: a manual override at priority 8). Show &gt; <b>Left overridden</b> lists only points held at
+priority 1 to 8, and Findings reports them too. Writing NULL at a priority releases it. Only writes seen in the capture
+count; Discover reads the device's real priority array.</p>
 <p><b>Point history</b> lists every point whose value appears in the capture, with how often it updated, how often it
 changed, and its low, high and latest value. Pick a point to see its graph. Orange markers are writes: hover to see who
 wrote what, and double-click the graph or a row to see the packets. Hover over the graph to read the value at any
@@ -423,6 +433,7 @@ ch('map', 'Network map', 'Analyse a capture', f"""
 <p>The <b>Network map</b> ({k('Ctrl+9')}) draws the routers, the networks behind them and the devices on each network.
 Each router box shows its address and the device IDs it answers for; devices show their ID, address, name and
 manufacturer.</p>
+<p>The map is also in the web report and the PDF site report.</p>
 <p>Click a router, network or device on the map to see its packets. Save the map with {k('Ctrl+S')} as a picture
 (PNG), a vector drawing (SVG – opens in Visio, Inkscape or a browser and stays sharp at any size) or a web page.</p>
 """)
@@ -575,7 +586,7 @@ Grey placeholder rows show while it reads. The points are grouped into categorie
 the tree and on the page. <b>Refresh points</b> reads them again.</li>
 <li><b>Active alarms</b> asks the device which points are in alarm or fault, whether each alarm is acknowledged and
 its type. Double-click a row to open the point.</li>
-<li><b>Export points…</b> saves every point with its value as Excel or CSV.</li>
+<li><b>Export points…</b> saves every point with its value as Excel or CSV, or as an <b>EDE file</b> (Engineering Data Exchange, the point list other BACnet tools import). File &gt; Save in Discover saves an EDE file of every device whose points were read.</li>
 <li><b>Show packets</b> shows this device's packets in the open capture.</li>
 </ul>
 <h3>A category</h3>
@@ -710,6 +721,9 @@ ticked). When one is available, a blue bar appears:</p>
 (about a minute). Your captures, names, notes and settings are kept.</li>
 <li><b>Later</b> – hides the bar until the next version.</li>
 </ul>
+<p>On a Mac the button is <b>Download update</b>: the new version downloads in the browser. Quit the app, open the
+downloaded .zip and drag BACnet Inspector into Applications, choosing Replace. (A Mac app can only update itself when it
+is signed with a paid Apple developer certificate.)</p>
 <p>Help &gt; <b>Check for updates…</b> checks straight away. Help &gt; <b>About</b> shows the version you have.</p>
 """)
 

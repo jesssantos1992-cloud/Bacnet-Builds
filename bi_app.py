@@ -1205,6 +1205,7 @@ class MainWindow(QMainWindow):
         self.help_menu = m
         act(m, 'User manual', lambda: self.manual(), 'F1')
         act(m, 'Take the tour', self.tour)
+        act(m, 'Open sample capture', self.open_sample)
         m.addSeparator()
         act(m, 'Quick start', lambda: self.manual('quick'))
         act(m, 'Display filter reference', lambda: self.manual('filter'))
@@ -1275,10 +1276,11 @@ class MainWindow(QMainWindow):
             elif t and t.live:
                 e.set('wave', 'Nothing captured yet', f'{VTITLE.get(k, "This view")} fills in as packets arrive. '
                       'Start the live capture, or open a saved capture.',
-                      [('Start capture', lambda: (self.goto('p'), self.start_stop())), ('Open capture…', self.open_files)])
+                      [('Start capture', lambda: (self.goto('p'), self.start_stop())), ('Open capture…', self.open_files),
+                       ('Try the sample', self.open_sample)])
             else:
                 e.set('file', 'No capture open', f'Open a capture to see {VTITLE.get(k, "this view").lower()}.',
-                      [('Open capture…', self.open_files)])
+                      [('Open capture…', self.open_files), ('Try the sample', self.open_sample)])
             w = e
         if self.stack.currentWidget() is not w:
             self.stack.setCurrentWidget(w)
@@ -1425,7 +1427,8 @@ class MainWindow(QMainWindow):
         if not self.P:
             if t.live:
                 self.pk.set_empty('Live capture ready', 'Choose an adapter above and press Start. Saved captures open in their own '
-                                  'tabs.', 'wave', [('Start capture', self.start_stop), ('Open capture…', self.open_files)])
+                                  'tabs.', 'wave', [('Start capture', self.start_stop), ('Open capture…', self.open_files),
+                                                    ('Try the sample', self.open_sample)])
             else:
                 self.pk.set_empty(f'Opening {t.n}', t.busy[:1].upper() + t.busy[1:], 'file', [], busy=True)
         QTimer.singleShot(0, lambda s=t.scroll: self.pk.tv.verticalScrollBar().setValue(s))
@@ -1467,6 +1470,17 @@ class MainWindow(QMainWindow):
             self.open_path(p)
         if paths:
             self.tip('open', self.tabrow, 900)
+
+    def open_sample(self):
+        """A made-up capture of a small building, so a new user can try every page without a site."""
+        import bi_sample
+        p = os.path.join(BL.state_dir(), 'sample-building.pcap')
+        try:
+            bi_sample.write_sample(p)
+        except OSError as e:
+            return self.toast(f'Could not make the sample capture: {e}')
+        self.open_path(p)
+        self.toast('Sample capture: a made-up building with a few problems to find. Start on Findings.')
 
     def open_path(self, path, q='', activate=True):
         path = os.path.abspath(path)
@@ -2690,7 +2704,8 @@ class MainWindow(QMainWindow):
             self.ub.hide()
             return
         self.ub_l.setText(f"Version {r['latest']} is available (you have {r['current']}).")
-        self.ub_go.setVisible(bool(r.get('can_install')))
+        self.ub_go.setText('Download update' if r.get('download') and not r.get('can_install') else 'Update now')
+        self.ub_go.setVisible(bool(r.get('can_install') or r.get('download')))
         self.ub.show()
 
     def upd_later(self):
@@ -2718,7 +2733,8 @@ class MainWindow(QMainWindow):
                 n.setReadOnly(True)
                 n.setMaximumHeight(200)
                 v.addWidget(n)
-            v.addWidget(label('Your captures, labels and settings are kept. The app closes, updates and reopens by itself.'
+            v.addWidget(label(MAC_STEPS if r.get('download') and not r.get('can_install') else
+                              'Your captures, labels and settings are kept. The app closes, updates and reopens by itself.'
                               + ('' if r.get('can_install') else ' Automatic install only works in the installed Windows app.'), muted=True))
         auto = QCheckBox('Check automatically')
         auto.setChecked(self.store.get('bi_updauto', '1') != '0')
@@ -2727,7 +2743,10 @@ class MainWindow(QMainWindow):
         if r.get('ok') and r.get('newer') and r.get('can_install'):
             g = bb.addButton('Install and restart', QDialogButtonBox.ButtonRole.AcceptRole)
             g.clicked.connect(lambda: (d.accept(), self.upd_install()))
-        if r.get('ok') and r.get('newer') and r.get('page'):
+        if r.get('ok') and r.get('newer') and r.get('download') and not r.get('can_install'):
+            g = bb.addButton('Download update', QDialogButtonBox.ButtonRole.AcceptRole)
+            g.clicked.connect(lambda: (d.accept(), self.upd_install()))
+        elif r.get('ok') and r.get('newer') and r.get('page'):
             pg = bb.addButton('Download page', QDialogButtonBox.ButtonRole.ActionRole)
             from PySide6.QtGui import QDesktopServices
             from PySide6.QtCore import QUrl
@@ -2742,6 +2761,13 @@ class MainWindow(QMainWindow):
         d.exec()
 
     def upd_install(self):
+        r = self.upd or {}
+        if r.get('download') and not r.get('can_install'):            # Mac: the browser downloads it, the user swaps the app
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(r['download']))
+            QMessageBox.information(self, 'Download update', MAC_STEPS)
+            return
         d = QMessageBox(self)
         d.setWindowTitle('Updating…')
         d.setText('Downloading and checking the new version. The app will close and reopen by itself – this takes about a minute.')
@@ -2761,6 +2787,11 @@ class MainWindow(QMainWindow):
                     self.save_session()
             self.on_ui(done)
         threading.Thread(target=work, daemon=True).start()
+
+
+MAC_STEPS = ('The new version is downloading in your browser. When it has finished: quit BACnet Inspector, open the '
+             'downloaded .zip in Downloads, and drag BACnet Inspector into Applications (choose Replace). Your captures, '
+             'names and settings are kept.')
 
 
 # ================================================================== start --

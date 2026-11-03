@@ -20,6 +20,7 @@ $m = [ordered]@{
   url     = "$repo/releases/download/v$Version/BACnet-Inspector-Setup-$Version.exe"
   sha256  = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
   page    = "$repo/releases/latest"
+  mac     = "$repo/releases/download/v$Version/BACnet-Inspector-Mac-$Version.zip"   # built by GitHub after the release
 }
 # UTF-8 without a BOM: the app's JSON reader rejects a BOM.
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'installer\update.json'), ($m | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))

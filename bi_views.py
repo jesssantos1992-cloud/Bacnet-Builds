@@ -507,6 +507,10 @@ class ChangesView(BaseView):
         v.addWidget(self.tbl, 100)
         self.more = hint('')
         v.addWidget(self.more)
+        self.vcb = QPushButton('Show value changes')
+        self.vcb.clicked.connect(lambda: self.wf.setCurrentIndex(self.wf.findData('v')))
+        self.vcb.hide()
+        v.addWidget(self.vcb, 0, Qt.AlignmentFlag.AlignLeft)
         v.addStretch(1)
         self.wf.currentIndexChanged.connect(self.refresh)
         self.wq.textChanged.connect(self.refresh)
@@ -558,8 +562,26 @@ class ChangesView(BaseView):
             data.append(f"no == {w['no']}")
         self.tbl.fill(rows, data)
         self.tbl.snug()
-        self.more.setText('Showing the first 3,000. Save as a spreadsheet for the full list.' if len(R) > 3000 else '')
+        self.more.setText('Showing the first 3,000. Save as a spreadsheet for the full list.' if len(R) > 3000 else
+                          self.empty_text(L, vc) if not R else '')
+        self.vcb.setVisible(not R and bool(vc) and self.wf.currentData() != 'v')
         self._stale = False
+
+    def empty_text(self, L, vc):
+        """Why the list is empty, so a blank page is never a mystery."""
+        if self.wq.text():
+            return 'Nothing matches the search.'
+        if L:
+            return 'None of the changes in this capture are of this kind. Pick Everything under Show.'
+        if self.wf.currentData() == 'v':
+            return ('No point reported a new value by itself (COV) in this capture. Points that are only polled with Read '
+                    'Property are not listed here: see Point history and Traffic.')
+        t = ('Nobody wrote a value or sent a command while this capture ran. This is normal when nobody is changing '
+             'anything. On a switched network the PC also only sees writes it sends or receives itself: to see writes '
+             'between a workstation and a controller, capture on a mirrored (SPAN) switch port or on the workstation.')
+        if vc:
+            t += f' {C.pl(vc, "value change")} reported by the points themselves were seen.'
+        return t
 
     def formats(self):
         w = self.win
@@ -969,6 +991,20 @@ class MapCanvas(QWidget):
             self.view.go(f)
 
 
+def map_image(win, scale=2):
+    """The network map as a picture on white, or None when there is nothing to draw."""
+    svg, _r, W, H = map_svg(win, False)
+    if not svg:
+        return None
+    img = QImage(int(W * scale), int(H * scale), QImage.Format.Format_ARGB32)
+    img.fill(QColor('white'))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(QByteArray(svg.encode('utf-8'))).render(p, QRectF(0, 0, W * scale, H * scale))
+    p.end()
+    return img
+
+
 class MapView(BaseView):
     key, title = 'g', 'Network map'
 
@@ -1000,15 +1036,9 @@ class MapView(BaseView):
         w = self.win
 
         def png():
-            svg, _r, W, H = map_svg(w, False)
-            if not svg:
+            img = map_image(w)
+            if img is None:
                 raise ValueError('the map is empty')
-            img = QImage(int(W * 2), int(H * 2), QImage.Format.Format_ARGB32)
-            img.fill(QColor('white'))
-            p = QPainter(img)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            QSvgRenderer(QByteArray(svg.encode('utf-8'))).render(p, QRectF(0, 0, W * 2, H * 2))
-            p.end()
             ba = QByteArray()
             from PySide6.QtCore import QBuffer
             buf = QBuffer(ba)
@@ -1863,9 +1893,10 @@ def rep_model(win):
             'notes': [{'no': r.no, 't': C.tofixed(r.t - win.T0, 3), 'info': r.info, 'note': r.note or ''} for r in P if r.bm]}
 
 
-def html_report(win, info=None, logo=None):
+def html_report(win, info=None, logo=None, net_map=None):
     """info: the customer, site, technician and notes of a site report. logo: the image source for the
-    company logo (a data URI by default, so the saved page works on its own)."""
+    company logo (a data URI by default, so the saved page works on its own). net_map: (image source, width,
+    height) of the network map picture; by default the map is drawn inline as SVG."""
     R = rep_model(win)
     H = lambda x: win.labels.hl(str(x), True)  # noqa: E731
     info = info or {}
@@ -1900,6 +1931,12 @@ def html_report(win, info=None, logo=None):
     b += f"<h2>Devices ({len(R['devs'])})</h2>" + (html_table(['ID', 'Name', 'Manufacturer', 'Model', 'Address', 'Network', 'Gateway', ''],
           [[f"<b>{d['id']}</b>", esc(d['name']), esc(d['vendor']), esc(d['model']), H(d['addr']), d['net'], H(d['gw']), '⚠ duplicate ID' if d['dup'] else '']
            for d in R['devs']]) if R['devs'] else '<p class="mu">No devices announced themselves in this capture.</p>')
+    if net_map:
+        b += f'<h2>Network map</h2><p><img src="{net_map[0]}" width="{net_map[1]}" height="{net_map[2]}"></p>'
+    elif net_map is None and R['devs']:
+        svg = map_svg(win, False)[0]
+        if svg:
+            b += f'<h2>Network map</h2><div style="overflow-x:auto">{svg}</div>'
     if R['slow']:
         b += '<h2>Slow or silent devices</h2>' + html_table(['Device', 'Address', 'Answered', 'No answer', 'Typical', 'Worst'],
              [[', '.join(H('Device ' + str(i)) for i in e['ids']) or '—', H(e['key']), e['n'], e['miss'] or '',
@@ -2170,6 +2207,7 @@ class PointsView(BaseView):
         self.kind.addItem('Present value', 'pv')
         self.kind.addItem('Every property', 'all')
         self.kind.addItem('Written points', 'w')
+        self.kind.addItem('Left overridden (priority 1–8)', 'o')
         row.addWidget(self.kind)
         self.q = QLineEdit()
         self.q.setPlaceholderText('Search address, point or name')
@@ -2178,7 +2216,7 @@ class PointsView(BaseView):
         row.addWidget(self.q)
         row.addStretch(1)
         v.addLayout(row)
-        self.tbl = Table(['Device', 'Point', 'Property', 'Updates', 'Changes', 'Low', 'High', 'Latest', 'Writes'])
+        self.tbl = Table(['Device', 'Point', 'Property', 'Updates', 'Changes', 'Low', 'High', 'Latest', 'Writes', 'Priority held'])
         self.tbl.rowActivated.connect(self.go)
         self.tbl.itemSelectionChanged.connect(self.picked)
         v.addWidget(self.tbl, 3)
@@ -2194,7 +2232,8 @@ class PointsView(BaseView):
         K, Q = self.kind.currentData(), self.q.text().lower()
         R = []
         for e in win.FD.pts or []:
-            if (K == 'pv' and e['prop'] != 'present-value') or (K == 'w' and not e['w']):
+            if ((K == 'pv' and e['prop'] != 'present-value') or (K == 'w' and not e['w']) or
+                    (K == 'o' and not any(h[0] <= 8 for h in e.get('held') or []))):
                 continue
             if Q and Q not in f"{who(win, e['key'], km)} {point_label(win, e, km)} {e['prop']}".lower():
                 continue
@@ -2221,7 +2260,9 @@ class PointsView(BaseView):
         for e in R:
             rows.append([who(win, e['key'], km), point_label(win, e, km), e['prop'], len(e['s']) or '', e['chg'] or '',
                          '' if e['lo'] is None else f"{e['lo']:.6g}", '' if e['hi'] is None else f"{e['hi']:.6g}",
-                         e['s'][-1][1] if e['s'] else e['w'][-1][1], (len(e['w']), {'fg': c['wa'], 'bold': True}) if e['w'] else ''])
+                         e['s'][-1][1] if e['s'] else e['w'][-1][1], (len(e['w']), {'fg': c['wa'], 'bold': True}) if e['w'] else '',
+                         (bi_points.held_text(e), {'fg': c['wa'], 'bold': True}) if any(h[0] <= 8 for h in e.get('held') or [])
+                         else bi_points.held_text(e)])
             data.append(f'cov && sender == "{e["key"]}" && object == "{e["obj"]}"' if e['s'] else
                         f'write && receiver == "{e["key"]}"')
         self.tbl.fill(rows, data)
@@ -2242,17 +2283,19 @@ class PointsView(BaseView):
         w = self.win
 
         def html():
-            return html_table(['Device', 'Point', 'Property', 'Updates', 'Changes', 'Low', 'High'],
+            return html_table(['Device', 'Point', 'Property', 'Updates', 'Changes', 'Low', 'High', 'Priority held'],
                               [[esc(e['key']), esc(point_label(w, e)), esc(e['prop']), len(e['s']), e['chg'],
-                                '' if e['lo'] is None else e['lo'], '' if e['hi'] is None else e['hi']] for e in self.rows()])
+                                '' if e['lo'] is None else e['lo'], '' if e['hi'] is None else e['hi'],
+                                esc(bi_points.held_text(e))] for e in self.rows()])
 
         def csv():
             o = []
             for e in self.rows():
                 pt = point_label(w, e)
-                o += [[C.tofixed(s[0] - w.T0, 3), s[3], e['key'], pt, e['prop'], s[1], 'reported'] for s in e['s']]
-                o += [[C.tofixed(x[0] - w.T0, 3), x[2], e['key'], pt, e['prop'], x[1], 'written by ' + x[3]] for x in e['w']]
-            return csv_text('Time (s),Packet,Device,Point,Property,Value,How', sorted(o, key=lambda r: float(r[0])))
+                o += [[C.tofixed(s[0] - w.T0, 3), s[3], e['key'], pt, e['prop'], s[1], 'reported', ''] for s in e['s']]
+                o += [[C.tofixed(x[0] - w.T0, 3), x[2], e['key'], pt, e['prop'], x[1], 'written by ' + x[3],
+                       '' if x[4] is None else x[4]] for x in e['w']]
+            return csv_text('Time (s),Packet,Device,Point,Property,Value,How,Priority', sorted(o, key=lambda r: float(r[0])))
         return PageView.savef(self, 'Point history', html, csv)
 
 
@@ -2492,7 +2535,12 @@ def pdf_report(win, info):
     img = QImage(logo_path())
     if not img.isNull():
         d.addResource(QTextDocument.ResourceType.ImageResource, QUrl('accs-logo.png'), img)
-    d.setHtml(html_report(win, info, 'accs-logo.png' if not img.isNull() else ''))
+    mp, net_map = map_image(win), ''
+    if mp is not None:
+        fit = min(1.0, (w.width() - 4) / mp.width(), (w.height() * 0.8) / mp.height())     # fit the page, keep the shape
+        d.addResource(QTextDocument.ResourceType.ImageResource, QUrl('network-map.png'), mp)
+        net_map = ('network-map.png', int(mp.width() * fit), int(mp.height() * fit))
+    d.setHtml(html_report(win, info, 'accs-logo.png' if not img.isNull() else '', net_map))
     d.setPageSize(QSizeF(w.width(), w.height()))
     d.print_(w)
     del w

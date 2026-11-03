@@ -668,11 +668,76 @@ class Pk:
     len = 0
     d = b''
     tree = None
-    fl = bad = exp = mt = o = v = nak = dk = dn = sn = sa = key = adv = rb = nn = None
+    fl = bad = exp = mt = o = v = nak = dk = dn = sn = sa = key = adv = rb = nn = fd = fw = None
     iam = whois = rq = rs = sig = wr = cov = rp = er = val = names = bm = note = wrx = ob = cv = al = None
 
 
 _PAD = b'\0' * 64
+
+
+def bbmd_findings(P, tEnd, name_of):
+    """Foreign devices that let their BBMD registration lapse, and broadcasts that reach a subnet twice."""
+    out, reg, seen, dup = [], {}, {}, {}
+    for r in P:
+        if r.fd is not None:
+            reg.setdefault((r.src, r.dst), []).append((r.t, r.fd))
+        if r.fw is not None:
+            k = (r.o, r.dst.split(':')[0], r.fw)
+            x = seen.get(k)
+            if x and x[0] != r.src and r.t - x[1] < 2:
+                dup.setdefault(frozenset((x[0], r.src)), []).append(r.no)
+            seen[k] = (r.src, r.t)
+    lapsed = []
+    for (fd, bb), L in reg.items():
+        for (t0, ttl), nxt in zip(L, L[1:] + [(tEnd, None)]):
+            gap = nxt[0] - t0
+            if ttl and gap > ttl + 30:                      # BACnet gives 30 s of grace after the time-to-live
+                lapsed.append((fd, bb, ttl, gap, nxt[1] is None))
+                break
+    if lapsed:
+        fd, bb, ttl, gap, end = lapsed[0]
+        out.append({'s': 'WARNING', 't': 'A foreign device lets its BBMD registration run out' if len(lapsed) == 1 else
+                    f'{len(lapsed)} foreign devices let their BBMD registration run out',
+                    'q': ' || '.join(f'(sender == "{a}" && receiver == "{b}")' for a, b, *_ in lapsed[:6]),
+                    'w': f'{fd} registered with the BBMD at {bb} for {ttl} seconds, then ' +
+                         ('did not register again before the capture ended' if end else f'waited {round(gap)} seconds before registering again') + '.',
+                    'ev': [f'{a} → BBMD {b}: registered for {t} s, ' + ('no renewal seen' if e else f'renewed after {round(g)} s')
+                           for a, b, t, g, e in lapsed[:10]],
+                    'y': 'A foreign device (often a laptop or a front-end on another subnet) only receives broadcasts while its registration is current. When it lapses, Who-Is, I-Am and other broadcasts stop reaching it, so devices seem to vanish for a while and then come back.',
+                    'f': ['Check the foreign device setting on that PC or device: it must re-register before the time-to-live runs out.',
+                          'Raise the time-to-live (for example 300 to 900 seconds) if it is very short.',
+                          'Check nothing between the device and the BBMD blocks UDP 47808 for a while (VPN, firewall timeouts).',
+                          'Capture for longer than the time-to-live and confirm the registrations keep coming.']})
+    if dup:
+        pair, nos = max(dup.items(), key=lambda x: len(x[1]))
+        a, b = sorted(pair)
+        if len(nos) >= 3:
+            out.append({'s': 'WARNING', 't': 'Broadcasts arrive twice through two BBMDs',
+                        'q': ' || '.join(f'no == {n}' for n in nos[:40]),
+                        'w': f'The BBMDs at {a} and {b} both forwarded the same broadcasts onto this subnet ({len(nos)} times in this capture).',
+                        'ev': [f'BBMDs {a} and {b}', f'{len(nos)} duplicated broadcasts'],
+                        'y': 'Each subnet should have exactly one BBMD in the Broadcast Distribution Table. With two, every broadcast from another subnet arrives twice: devices answer twice, Who-Is floods double, and some front-ends list devices twice.',
+                        'f': [f'Check the Broadcast Distribution Table (BDT) on {a} and {b}: only one of them should serve this subnet.',
+                              'Make every BBMD hold the same BDT, with one entry per subnet.',
+                              'Check no device is both a BBMD and a registered foreign device.',
+                              'Capture again and confirm each broadcast arrives once.']})
+    return out
+
+
+def override_findings(pts, name_of):
+    """Points still held by a manual or higher priority (1 to 8) when the capture ended."""
+    L = [(e, h) for e in pts or [] for h in e.get('held') or [] if h[0] <= 8]
+    if not L:
+        return []
+    e0, h0 = L[0]
+    return [{'s': 'NOTE', 't': 'A point was left overridden' if len(L) == 1 else f'{len(L)} points were left overridden',
+             'q': ' || '.join(f'(write && receiver == "{e["key"]}" && object == "{e["obj"]}")' for e, _ in L[:6]),
+             'w': f"{name_of(h0[2])} wrote {e0['obj']} on {name_of(e0['key'])} to {h0[1]} at priority {h0[0]} and did not release it in this capture.",
+             'ev': [f"{name_of(e['key'])} {e['obj']}: priority {h[0]} = {h[1]} (by {name_of(h[2])})" for e, h in L[:12]],
+             'y': 'A value written at priority 1 to 8 (8 is manual operator) stays in control until someone releases it. A forgotten override keeps a fan, valve or setpoint fixed and the normal control program cannot change it.',
+             'f': ['Check on the front-end or in Discover (point Details > priority array) whether the override is still needed.',
+                   'Release it by writing NULL at the same priority when the work is done.',
+                   'Only writes seen in this capture are counted: an override made earlier or released later is not shown.']}]
 
 
 def npdu(d, L, o, r, tree):
@@ -1062,8 +1127,10 @@ def dis(t, lt, data, no, ifc=0, want_tree=False) -> Pk:
                     elif f == 4:
                         r.o = '.'.join(str(x) for x in d[b + 4:b + 8]) + ':' + str(d[b + 8] << 8 | d[b + 9])
                         q = b + 10
+                        r.fw = hash(bytes(d[q:L]))                  # to spot the same broadcast forwarded twice
                     if f == 5:
-                        r.info = 'Register-Foreign-Device: asking this BBMD to include it'
+                        r.fd = d[b + 4] << 8 | d[b + 5] if L >= b + 6 else 0
+                        r.info = f'Register-Foreign-Device: asking this BBMD to include it for {r.fd} s'
                     if f in (4, 9, 10, 11):
                         r.info = npdu(d, L, q, r, tree)
                 elif d[b] == 0x82:
@@ -2253,6 +2320,8 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                                   'Split the trunk: move some controllers to a second trunk behind another router or gateway.',
                                   'Check the Response times tab to see which devices are slow to answer.',
                                   'Capture again after the change and compare on the Compare tab.']})
+    out.extend(bbmd_findings(P, tEnd, name_of))
+    out.extend(override_findings(out.pts, name_of))
     order = {'SERIOUS': 0, 'WARNING': 1, 'NOTE': 2}
     out.sort(key=lambda f: order[f['s']])
     out.sp, out.sl, out.dv, out.via, out.adv, out.gws, out.nm, out.nets = sp, sl, list(dv.values()), via, adv, gws, nmap, nets

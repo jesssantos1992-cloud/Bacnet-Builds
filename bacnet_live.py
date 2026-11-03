@@ -85,6 +85,9 @@ def update_check():
     newer = _vt(m["version"]) > _vt(APP_VERSION)
     out.update(ok=True, latest=str(m["version"]), newer=newer, notes=str(m.get("notes") or "")[:4000],
                date=str(m.get("date") or "")[:40], page=(str(m.get("page") or "")[:300] if str(m.get("page") or "").lower().startswith("https://") else ""))
+    mac = str(m.get("mac") or "")[:300]
+    # a Mac cannot install by itself (that needs a paid Apple certificate): offer the download instead
+    out["download"] = (mac if mac.lower().startswith("https://") else out["page"]) if sys.platform == "darwin" else ""
     return out
 
 

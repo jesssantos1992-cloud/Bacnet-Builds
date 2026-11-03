@@ -62,9 +62,20 @@ until(lambda: w.explorer.busy == '' and sum(1 for d in w.explorer.devs.values() 
 pump(0.5)
 saves = []
 w.save_as = lambda v, fm, holder, title=None: saves.append((v, [f[0] for f in fm], title))
+MSGS = []
+_set = type(w.explorer).__setattr__
+
+
+def record(self, k, v):                       # every status message, so a quick inventory cannot slip past a poll
+    if k == 'msg':
+        MSGS.append(v)
+    _set(self, k, v)
+
+
+type(w.explorer).__setattr__ = record
 dv.inventory()
-seen_progress = until(lambda: 'Building the site inventory' in dv.status.text(), 10)
 until(lambda: w.explorer.busy == '' and saves, 60)
+seen_progress = any('Building the site inventory' in str(m) for m in MSGS)
 pump(0.3)
 print('progress shown:', seen_progress, '| status:', w.explorer.msg)
 print('save offered:', saves)
@@ -78,8 +89,11 @@ xl = fm['inventory.xlsx'][3]()
 head = lines[0].split(',')
 rows = [r.split(',') for r in lines[1:]]
 objs = [int(r[head.index('Objects')]) for r in rows]
-ok = (len(rows) == 2 and all(n > 0 for n in objs) and xl[:2] == b'PK' and saves and saves[0][1][0] == 'inventory.xlsx'
-      and 'MAC 1' in csv and 'MAC 5' in csv and 'VAV-1' in csv and seen_progress)
+checks = {'two devices': len(rows) == 2, 'objects read': bool(objs) and all(n > 0 for n in objs), 'Excel file': xl[:2] == b'PK',
+          'Save offered': bool(saves) and saves[0][1][0] == 'inventory.xlsx', 'MAC 1 and 5': 'MAC 1' in csv and 'MAC 5' in csv,
+          'device name': 'VAV-1' in csv, 'progress shown': seen_progress}
+ok = all(checks.values())
+print('failed checks:', [k for k, v in checks.items() if not v])
 print('objects per device:', objs, '| xlsx bytes:', len(xl))
 dv.ms_join_leave()
 pump(0.3)
