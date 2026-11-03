@@ -1187,6 +1187,9 @@ class MainWindow(QMainWindow):
         act(m, 'Site profiles…', self.sites_dlg)
         act(m, 'Build site inventory…', lambda: (self.goto('x'), self.view('x').inventory()), None,
             lambda: not self.explorer.busy)
+        act(m, 'Site health audit…', lambda: self.site_audit(), None, lambda: not self.explorer.busy)
+        act(m, 'Check device clocks…', lambda: self.site_audit(True), None,
+            lambda: not self.explorer.busy)
         m.addSeparator()
         act(m, 'Send Who-Is (all devices)', lambda: self.send_msg('whois'))
         act(m, 'Send Who-Is-Router (all networks)', lambda: self.send_msg('whoisrouter'))
@@ -1470,6 +1473,10 @@ class MainWindow(QMainWindow):
             self.open_path(p)
         if paths:
             self.tip('open', self.tabrow, 900)
+
+    def site_audit(self, clocks_only=False):
+        import bi_sitewin
+        return bi_sitewin.audit_dialog(self, clocks_only)
 
     def open_sample(self):
         """A made-up capture of a small building, so a new user can try every page without a site."""

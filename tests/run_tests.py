@@ -48,6 +48,7 @@ def main():
              ('Discover through a BBMD', [py, 'bbmd_test.py'], False),
              ('site inventory', [py, 'inventory_test.py'], False),
              ('sample capture, overrides, BBMD checks, EDE, map in reports', [py, 'sample_test.py'], False),
+             ('site health audit, trend logs, schedules, clocks, live watch', [py, 'site_test.py'], False),
              ('light, dark and automatic theme on screen', [py, 'theme_test.py'], False),
              ('navigation and Back', [py, 'nav_test.py'], False),
              ('problem log and Report a problem', [py, 'log_test.py'], False),

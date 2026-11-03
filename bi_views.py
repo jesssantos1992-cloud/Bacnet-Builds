@@ -1937,6 +1937,10 @@ def html_report(win, info=None, logo=None, net_map=None):
         svg = map_svg(win, False)[0]
         if svg:
             b += f'<h2>Network map</h2><div style="overflow-x:auto">{svg}</div>'
+    au = getattr(getattr(win, 'explorer', None), 'audit', None)
+    if au:
+        import bi_sitewin
+        b += bi_sitewin.audit_html(au, 'h2')
     if R['slow']:
         b += '<h2>Slow or silent devices</h2>' + html_table(['Device', 'Address', 'Answered', 'No answer', 'Typical', 'Worst'],
              [[', '.join(H('Device ' + str(i)) for i in e['ids']) or '—', H(e['key']), e['n'], e['miss'] or '',
@@ -2010,6 +2014,11 @@ class PointChart(QWidget):
         self.hover = self.drag = None
         self.setMinimumHeight(230)
         self.setMouseTracking(True)
+        self.empty = 'Pick a point above to see its values over time'
+
+    def when(self, t):
+        """Time on the axis and in the readout: seconds into the capture."""
+        return rel(self.win, t)
 
     def show_point(self, e):
         if e is not self.e:
@@ -2056,7 +2065,7 @@ class PointChart(QWidget):
         e = self.e
         if not e or not (e['s'] or e['w']):
             p.setPen(QColor(c['mu']))
-            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, 'Pick a point above to see its values over time')
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.empty)
             p.end()
             return
         sc = self.scale()
@@ -2083,7 +2092,7 @@ class PointChart(QWidget):
             x = self.xy(t, lo, sc).x()
             a = Qt.AlignmentFlag.AlignLeft if i == 0 else Qt.AlignmentFlag.AlignRight if i == 4 else Qt.AlignmentFlag.AlignHCenter
             r = QRectF(x if i == 0 else x - 120 if i == 4 else x - 60, h + 4, 120, 18)
-            p.drawText(r, a | Qt.AlignmentFlag.AlignVCenter, rel(self.win, t))
+            p.drawText(r, a | Qt.AlignmentFlag.AlignVCenter, self.when(t))
         p.save()
         p.setClipRect(QRectF(self.M_L, 0, self.width() - self.M_L - self.M_R, self.height()))
         p.setPen(QPen(QColor(c['ac']), 1.8))
@@ -2115,7 +2124,7 @@ class PointChart(QWidget):
             cur = next((x for x in reversed(S) if x[0] <= t), S[0])
             p.setPen(QPen(QColor(c['mu']), 1, Qt.PenStyle.DotLine))
             p.drawLine(QPointF(self.hover, self.M_T), QPointF(self.hover, h))
-            txt = f"{rel(self.win, t)}   {cur[2][1]}"
+            txt = f"{self.when(t)}   {cur[2][1]}"
             tw = fm.horizontalAdvance(txt) + 16
             x = min(self.hover + 8, self.width() - self.M_R - tw)
             bg = QColor(c['card'])
@@ -2140,7 +2149,7 @@ class PointChart(QWidget):
         for w in e['w']:
             d = abs(self.xy(w[0], sc[3], sc).x() - pos.x())
             if d < bd:
-                best, bd = (f'{rel(self.win, w[0])}: {w[3]} wrote {w[1]}', w[2]), d
+                best, bd = (f'{self.when(w[0])}: {w[3]} wrote {w[1]}', w[2]), d
         if best:
             return best
         bd = 30.0
@@ -2148,7 +2157,7 @@ class PointChart(QWidget):
             q = self.xy(t, v, sc)
             d = math.hypot(q.x() - pos.x(), q.y() - pos.y())
             if d < bd:
-                best, bd = (f'{rel(self.win, t)}: {s[1]}', s[3]), d
+                best, bd = (f'{self.when(t)}: {s[1]}', s[3]), d
         return best
 
     def mouseMoveEvent(self, ev):
@@ -2157,7 +2166,8 @@ class PointChart(QWidget):
             self.drag = (self.drag[0], x)
         else:
             n = self.near(ev.position())
-            self.setToolTip((n[0] + '\nDouble-click to see this packet') if n else 'Drag across the graph to zoom in')
+            self.setToolTip((n[0] + ('\nDouble-click to see this packet' if n[1] is not None else '')) if n
+                            else 'Drag across the graph to zoom in')
         self.hover = x
         self.update()
 
@@ -2184,7 +2194,7 @@ class PointChart(QWidget):
 
     def mouseDoubleClickEvent(self, ev):
         n = self.near(ev.position())
-        if n:
+        if n and n[1] is not None:
             self.win.go_packets(f'no == {n[1]}')
 
 

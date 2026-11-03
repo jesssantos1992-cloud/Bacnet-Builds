@@ -609,6 +609,33 @@ class), the <b>priority array</b> for commandable points (which priority is in c
 current value from the device (read-only).</p>
 """)
 
+ch('sitetools', 'Site health audit, trends, schedules and clocks', 'Discover', """
+<p>These read straight from the devices found in Discover. They only read: nothing is changed.</p>
+<h3>Site health audit</h3>
+<p>Capture &gt; <b>Site health audit…</b> reads every point of every device and lists the ones <b>in fault</b> (with the
+reason, such as no sensor), <b>in alarm</b>, <b>out of service</b> (the value is not coming from the field), <b>overridden</b>
+(commanded at priority 1 to 8, or by a hand switch), trend logs that are <b>switched off</b>, devices that are not
+operational and <b>clocks</b> more than a minute out. Faults come first. Pick a kind under the list to see only that
+kind, double-click a row to open the point, and <b>Export…</b> it as Excel, a spreadsheet or a web page. The last audit
+is also added to the web report and the PDF site report. A large site takes a few minutes, longer over MS/TP; press
+<b>Stop</b> to end it early.</p>
+<h3>Device clocks</h3>
+<p>Capture &gt; <b>Check device clocks…</b> compares every device clock with this PC, or press <b>Check clock</b> on a
+device's page. A clock out by whole hours usually means the time zone or daylight saving setting is wrong; one out by
+years was never set. Wrong clocks make schedules run at the wrong time and trend logs hard to read.</p>
+<h3>Trend log history</h3>
+<p>Open a trend log in Discover and press <b>Show history…</b>: the values it has stored are read from the device and
+graphed, with what it records and how often. Hover to read a value, drag to zoom in, right-click to zoom out.
+The newest 2,000 records are read first; <b>Read all</b> reads the rest. <b>Export…</b> saves them for Excel.</p>
+<h3>Schedules</h3>
+<p>Open a schedule and press <b>Show schedule…</b> to see its week as a chart (green when on), each day's changes and
+the exceptions (holidays and special days) with their priority.</p>
+<h3>Watch points live</h3>
+<p>Press <b>Watch live</b> on any point to add it to the watch window, which reads up to 12 points every few seconds and
+graphs the one you pick. It reads with Read Property, so it works on every device and changes nothing on it. Use it
+while you test a sequence or tune a loop; <b>Export…</b> saves every reading.</p>
+""")
+
 ch('write', 'Writing values (write access)', 'Discover', """
 <p>Writing changes real equipment, so it is switched off until you turn it on – and it switches itself off again.</p>
 <h3>Turning write access on</h3>

@@ -50,6 +50,15 @@ def caption():
     return QColor(getattr(w, 'caption_color', '#ff00ff'))
 
 
+def page(px):
+    """The page background: the most common colour over a grid of the content area, so text and buttons do not count."""
+    from collections import Counter
+    side = w.sidew.width()
+    pts = [px(side + (w.width() - side) * (0.1 + 0.08 * i), w.height() * (0.35 + 0.05 * j)) for i in range(11) for j in range(8)]
+    name = Counter(c.name() for c in pts).most_common(1)[0][0]
+    return QColor(name)
+
+
 def sample(tag):
     img = w.grab().toImage()                    # the window as the app draws it
     img.save(os.path.join(OUT, tag + '.png'))
@@ -61,7 +70,7 @@ def sample(tag):
     return {'title bar': caption(),
             'sidebar': px(30, side.y() - 30),
             'top bar': px(w.width() * 0.6, w.menuBar().height() + 14),
-            'page': px(w.width() * 0.6, w.height() * 0.6)}
+            'page': page(px)}
 
 
 def os_dark():

@@ -1,1 +1,5 @@
-- Fixed: on empty pages the line under the heading was cut off when it wrapped onto a second line.
+- Site health audit (Capture menu): reads every point on site and lists the ones in fault, in alarm, out of service or overridden, trend logs that are switched off and wrong clocks. Export it, and it goes in the site report.
+- Device clocks: check every device clock against this PC (Capture menu, or Check clock on a device).
+- Trend logs: Show history on a trend log reads its stored values from the device and graphs them.
+- Schedules: Show schedule shows the week as a chart, with holidays and special days.
+- Watch live: graph up to 12 points as their values change.

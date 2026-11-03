@@ -335,6 +335,7 @@ class Explorer:
         self.stop = False
         self.on = False
         self.bbmd_rc = None
+        self.audit = None                                  # the last site health audit (bi_site.audit)
         self.scan_at = 0
         self.arm_until = 0.0
         self.opt = {'to': '', 'lo': '', 'hi': '', 'bbmd': '', 'lab': 1, 'auto': 1}

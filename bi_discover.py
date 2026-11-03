@@ -1019,6 +1019,12 @@ class DiscoverView(QWidget):
         ba.setEnabled(bool(e or en['cap']))
         ba.clicked.connect(lambda: self.read_alarms(en))
         r.addWidget(ba)
+        if e:
+            import bi_sitewin
+            bc = QPushButton('Check clock')
+            bc.setToolTip('Compare the device clock with this PC')
+            bc.clicked.connect(lambda: bi_sitewin.check_clock(self.win, e))
+            r.addWidget(bc)
         r.addWidget(label((e or {}).get('pm') or '', muted=True, wrap=False))
         r.addStretch(1)
         ww = QWidget()
@@ -1281,6 +1287,22 @@ class DiscoverView(QWidget):
             w = QPushButton('Write…')
             w.clicked.connect(lambda: write_dialog(self.win, e, o))
             r.addWidget(w)
+        import bi_sitewin
+        if o['ty'] == 20:
+            h = QPushButton('Show history…')
+            h.setToolTip('Read this trend log’s stored values from the device and graph them')
+            h.clicked.connect(lambda: bi_sitewin.trend_dialog(self.win, e, o))
+            r.addWidget(h)
+        elif o['ty'] == 17:
+            h = QPushButton('Show schedule…')
+            h.setToolTip('Read this schedule’s week and its holidays from the device')
+            h.clicked.connect(lambda: bi_sitewin.schedule_dialog(self.win, e, o))
+            r.addWidget(h)
+        if o['ty'] not in (6, 8, 10, 11, 15, 20):
+            lw = QPushButton('Watch live')
+            lw.setToolTip('Read the value every few seconds and graph it')
+            lw.clicked.connect(lambda: bi_sitewin.watch(self.win, e, o))
+            r.addWidget(lw)
         if not details:
             s = QPushButton('Show packets')
             s.setToolTip('Show the packets that mention this point')

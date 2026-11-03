@@ -1,5 +1,6 @@
 """A simulated MS/TP trunk with one or more controllers, to test bi_mstp + Discover without hardware."""
 import collections
+import math
 import struct
 import os
 import sys
@@ -98,6 +99,8 @@ class SimController(threading.Thread):
         self.out = collections.deque()       # frames to send when we hold the token
         self.on = True
         self.tokens = 0
+        self.trend = []                      # [(date bytes, time bytes), value] of trend log 1, when there is one
+        self.clock_off = 0.0                 # how far the device clock is from the PC's, in seconds
 
     def send(self, ty, dst, data=b''):
         self.p.write(M.frame(ty, dst, self.mac, data))
@@ -205,6 +208,20 @@ class SimController(threading.Thread):
                     body += ctx(2, bytes([p])) + b'\x4e' + self.prop(o, p) + b'\x4f'
                 k += 1
                 body += b'\x1f'
+        elif sv == 26 and self.trend:               # Read Range by position on a trend log's log-buffer
+            o = C.num(d[k + 1:k + 5])
+            j = k + 8                                # after the object, the property and the opening tag
+            a = C.tg(d, j)
+            start = C.num(d[a.v:a.v + a.len])
+            b = C.tg(d, a.v + a.len)
+            cnt = C.num(d[b.v:b.v + b.len])
+            recs = self.trend[start - 1:start - 1 + cnt]
+            more = start - 1 + cnt < len(self.trend)
+            items = b''.join(b'\x0e' + bytes([0xA4, *dt[0]]) + bytes([0xB4, *dt[1]]) + b'\x0f' + b'\x1e\x2c' + struct.pack('>f', v)
+                             + b'\x1f' + b'\x2a\x04\x00' for dt, v in recs)
+            body = (b'\x30' + bytes([inv, 26]) + b'\x0c' + struct.pack('>I', o) + b'\x19\x83'
+                    + b'\x3a\x05' + bytes([(0x80 if start == 1 else 0) | (0x40 if not more else 0) | (0x20 if more else 0)])
+                    + b'\x49' + bytes([len(recs)]) + b'\x5e' + items + b'\x5f')
         elif sv == 29:                              # Get Event Information: AI 1 is in high-limit alarm, not acknowledged
             body = (b'\x30' + bytes([inv, 29]) + b'\x0e' + b'\x0c' + oidb(0, 1) + b'\x19\x03' + b'\x2a\x05\x00'
                     + b'\x3e' + b'\x3f' + b'\x49\x00' + b'\x5a\x05\xe0' + b'\x6e' + unsigned(1) + unsigned(1) + unsigned(1) + b'\x6f'
@@ -229,9 +246,23 @@ class SimController(threading.Thread):
                 if idx == 0:
                     return unsigned(len(lst))
                 return b''.join(b'\xc4' + oidb(*x) for x in lst)
+            if p in (56, 57):
+                tm = time.localtime(time.time() + self.clock_off)
+                return (bytes([0xA4, tm.tm_year - 1900, tm.tm_mon, tm.tm_mday, tm.tm_wday + 1]) if p == 56
+                        else bytes([0xB4, tm.tm_hour, tm.tm_min, tm.tm_sec, 0]))
+            if p == 112:
+                return enum(0)
             return {77: cstr(self.name), 121: cstr('Delta Controls'), 70: cstr('Sim-MSTP'), 44: cstr('4.1'),
                     28: cstr('simulated controller'), 58: cstr('Plant room'), 12: cstr('1.0')}.get(p, b'\x00')
         ob = self.objs.get((t, inst), {})
+        if t == 17 and p == 123:                     # weekly schedule: on 07:00, off 18:00 on weekdays
+            day = b'\x0e' + b'\xb4\x07\x00\x00\x00' + enum(1) + b'\xb4\x12\x00\x00\x00' + enum(0) + b'\x0f'
+            week = [day] * 5 + [b'\x0e\x0f'] * 2
+            if idx == 0:
+                return unsigned(7)
+            return week[idx - 1] if idx else b''.join(week)
+        if t == 20 and p == 141:
+            return unsigned(len(self.trend))
         if p == 75:
             return b'\xc4' + oidb(t, inst)
         if p == 79:
@@ -248,14 +279,34 @@ class SimController(threading.Thread):
 SIMS = []
 
 
-def make_trunk(controllers):
+def make_trunk(controllers, site=False):
+    """site=True adds what the site tools look for: a trend log with history, a schedule, a point out of service,
+    one in fault, the fan overridden at priority 8, and the second controller's clock 5 minutes fast."""
     bus = Bus()
     SIMS.clear()
-    for mac, did, name in controllers:
+    for n, (mac, did, name) in enumerate(controllers):
         objs = {(0, 1): {77: cstr('SAT'), 85: real(13.2), 117: enum(62), 28: cstr('Supply air temp')},
                 (2, 7): {77: cstr('SAT SP'), 85: real(13.0), 117: enum(62), 28: cstr('')},
                 (4, 2): {77: cstr('Fan'), 85: enum(1), 117: enum(95), 28: cstr('Supply fan')}}
-        SIMS.append(SimController(bus, mac, did, name, objs))
+        sim = SimController(bus, mac, did, name, objs)
+        if site:
+            objs[(0, 2)] = {77: cstr('RAT'), 85: real(21.0), 117: enum(62), 28: cstr(''), 81: b'\x11'}
+            objs[(0, 3)] = {77: cstr('OAT'), 85: real(0.0), 117: enum(62), 28: cstr(''), 103: enum(1)}
+            objs[(4, 2)][87] = b'\x00' * 7 + enum(1) + b'\x00' * 8
+            objs[(17, 1)] = {77: cstr('Occupancy'), 85: enum(1), 174: enum(0), 32: b'\xa4\xff\xff\xff\xff' * 2,
+                             38: b'\x0e\x0c' + bytes([126, 12, 25, 255]) + b'\x0f\x2e\xb4\x00\x00\x00\x00' + enum(0)
+                                 + b'\x2f\x39\x0a'}
+            objs[(20, 1)] = {77: cstr('SAT trend'), 133: b'\x11', 134: b'\x23\x01\x5f\x90', 126: unsigned(500),
+                             132: b'\x0c' + oidb(0, 1) + b'\x19\x55'}
+            objs[(20, 2)] = {77: cstr('Old trend'), 133: b'\x10', 134: b'\x23\x01\x5f\x90', 126: unsigned(500),
+                             132: b'\x0c' + oidb(0, 1) + b'\x19\x55'}
+            t0 = time.time() - 300 * 900
+            for j in range(300):
+                tm = time.localtime(t0 + j * 900)
+                sim.trend.append((((tm.tm_year - 1900, tm.tm_mon, tm.tm_mday, tm.tm_wday + 1),
+                                   (tm.tm_hour, tm.tm_min, tm.tm_sec, 0)), 13 + 3 * math.sin(j / 12)))
+            sim.clock_off = 300.0 if n == 1 else 0.0
+        SIMS.append(sim)
     for s in SIMS:
         s.start()
     return bus
