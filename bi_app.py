@@ -27,7 +27,7 @@ import bacnet_live as BL
 import bi_core as C
 import bi_points
 import bi_ui as U
-from bi_common import (AUTHOR, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
+from bi_common import (AUTHOR, BRAND, COMPANY, COMPANY_CITY, COMPANY_SHORT, TAGLINE, logo_path, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
                        label, semibold, stamp)
 from bi_store import Store
 
@@ -801,8 +801,8 @@ class LivePanel(QWidget):
 
 # ============================================================ side bar icons --
 def side_icon(k):
-    """Sidebar icon: a thin line drawing in the accent colour."""
-    return U.icon(k, colors()['ac'], 18, 1.7)
+    """Sidebar icon: a thin line drawing in ACCS green (the sidebar is always charcoal)."""
+    return U.icon(k, BRAND, 18, 1.7)
 
 
 SIDE = [(None, None), ('p', 'Packets'), ('Analyze', None), ('f', 'Findings'), ('d', 'Devices'), ('w', 'Changes'),
@@ -887,8 +887,23 @@ class MainWindow(QMainWindow):
         self.sidew.setObjectName('sidew')
         self.sidew.setFixedWidth(236)
         sv = QVBoxLayout(self.sidew)
-        sv.setContentsMargins(0, 16, 0, 8)
+        sv.setContentsMargins(0, 14, 0, 8)
         sv.setSpacing(6)
+        bh = QHBoxLayout()                       # the company: logo, ACCS and the app's name
+        bh.setContentsMargins(20, 0, 12, 8)
+        bh.setSpacing(10)
+        self.logo = QLabel()
+        self.logo.setPixmap(QIcon(logo_path()).pixmap(QSize(30, 30)))
+        bh.addWidget(self.logo)
+        bt = QVBoxLayout()
+        bt.setSpacing(0)
+        self.brand_name = label(COMPANY_SHORT, bold=True, size=13, wrap=False)
+        self.brand_sub = label('BACnet Inspector', wrap=False)
+        self.brand_name.setToolTip(f'{COMPANY} · {TAGLINE} · {COMPANY_CITY}')
+        bt.addWidget(self.brand_name)
+        bt.addWidget(self.brand_sub)
+        bh.addLayout(bt, 1)
+        sv.addLayout(bh)
         self.side_title = label('Capture', bold=True, size=17, wrap=False)
         self.side_title.setContentsMargins(22, 0, 0, 2)
         sv.addWidget(self.side_title)
@@ -1060,22 +1075,23 @@ class MainWindow(QMainWindow):
     def style_chrome(self):
         """Colours of the sidebar, search field and banners (again after a theme change)."""
         c = colors()
-        ac = QColor(c['ac'])
-        sel = f"rgba({ac.red()},{ac.green()},{ac.blue()},{0.24 if is_dark() else 0.13})"
+        sel = 'rgba(129,195,92,0.24)'
         self.sidew.setStyleSheet(
-            f"QFrame#sidew{{background:{c['side']};border-right:1px solid {c['hair']}}}"
+            f"QFrame#sidew{{background:{c['side']};border-right:3px solid {BRAND}}}"
+            'QFrame#sidew QLabel{color:#f2f3f4}'
             'QListWidget{background:transparent;border:0;outline:0}'
-            f"QListWidget::item{{border-radius:7px;padding:0px 6px;margin:0px 10px;color:{c['fg']}}}"
-            'QListWidget::item:hover:!selected:enabled{background:rgba(118,118,128,0.14)}'
-            f"QListWidget::item:selected{{background:{sel};color:{c['fg']}}}"
-            f"QListWidget::item:disabled{{color:{c['mu']};background:transparent;padding-left:8px}}")
+            "QListWidget::item{border-radius:7px;padding:0px 6px;margin:0px 10px;color:#e6e8ea}"
+            'QListWidget::item:hover:!selected:enabled{background:rgba(255,255,255,0.08)}'
+            f"QListWidget::item:selected{{background:{sel};color:#ffffff}}"
+            "QListWidget::item:disabled{color:#8f959b;background:transparent;padding-left:8px}")
+        self.brand_sub.setStyleSheet('color:#a9afb5')
         for k, it in self.side_items.items():
             it.setIcon(side_icon(k))
         self.find_b.setIcon(U.icon('search', c['mu'], 16))
         self.find_b.setStyleSheet(f"QPushButton{{text-align:left;padding:5px 12px;border-radius:8px;border:0;"
                                   f"background:rgba(118,118,128,{0.24 if is_dark() else 0.12});color:{c['mu']}}}"
                                   f"QPushButton:hover{{background:rgba(118,118,128,{0.32 if is_dark() else 0.18})}}")
-        self.ub.setStyleSheet(f"QFrame#ub{{background:{c['ac']}}} QFrame#ub QLabel{{color:white}} QPushButton{{padding:2px 10px}}")
+        self.ub.setStyleSheet(f"QFrame#ub{{background:{c['ac']}}} QFrame#ub QLabel{{color:{c['acfg']}}} QPushButton{{padding:2px 10px}}")
         for b, n in ((self.back, 'back'), (self.nb, 'plus'), (self.pk.sqp, 'up'), (self.pk.sqd, 'down'), (self.live.rf, 'refresh')):
             b.setIcon(U.icon(n, c['fg'], 16))
         self.empty_view.retheme()

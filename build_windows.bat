@@ -21,6 +21,7 @@ echo Building the application...
   --name "BACnet Inspector" ^
   --icon "bacnet_inspector.ico" ^
   --add-data "bacnet_inspector.ico;." ^
+  --add-data "accs_logo.png;." ^
   --add-data "version.txt;." ^
   --add-data "update_url.txt;." ^
   --add-data "release_notes.txt;." ^

@@ -9,6 +9,7 @@ python3 -m PyInstaller --noconfirm --clean --windowed \
   --icon bacnet_inspector.ico \
   --osx-bundle-identifier com.jessesantos.bacnetinspector \
   --add-data "bacnet_inspector.ico:." \
+  --add-data "accs_logo.png:." \
   --add-data "version.txt:." \
   --add-data "update_url.txt:." \
   --add-data "release_notes.txt:." \

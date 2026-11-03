@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QD
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy,
                                QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
-from bi_common import AUTHOR, colors, is_dark, label
+from bi_common import AUTHOR, COMPANY, COMPANY_CITY, COMPANY_SHORT, colors, is_dark, label, logo_path
 
 # ------------------------------------------------------------------ fonts --
 BODY_PT = 10
@@ -43,12 +43,13 @@ def apply_fonts(app):
 
 
 def apply_palette(app):
-    """One accent colour everywhere: selection, checkboxes, links and focus use the app's blue."""
+    """One accent colour everywhere: selection, checkboxes, links and focus use ACCS green."""
     c = colors()
     pal = QPalette()                  # only the roles set here are overridden; the rest follow light / dark mode
     ac = QColor(c['ac'])
     for g in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
         pal.setColor(g, QPalette.ColorRole.Highlight, ac)
+        pal.setColor(g, QPalette.ColorRole.HighlightedText, QColor(c['acfg']))
         pal.setColor(g, QPalette.ColorRole.Accent, ac)
         pal.setColor(g, QPalette.ColorRole.Link, ac)
     app.setPalette(pal)
@@ -205,7 +206,7 @@ def primary(btn):
     """The one filled, accent-coloured button on a page."""
     ac = QColor(colors()['ac'])
     hov = ac.lighter(112).name()
-    btn.setStyleSheet(f'QPushButton{{background:{ac.name()};color:white;border:0;border-radius:6px;padding:6px 16px;font-weight:600}}'
+    btn.setStyleSheet(f'QPushButton{{background:{ac.name()};color:{colors()["acfg"]};border:0;border-radius:6px;padding:6px 16px;font-weight:600}}'
                       f'QPushButton:hover{{background:{hov}}}QPushButton:disabled{{background:rgba(120,120,128,0.25);color:rgba(255,255,255,0.7)}}')
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     return btn
@@ -865,6 +866,15 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
         w.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(w)
     v.addSpacing(10)
+    co = QHBoxLayout()
+    co.addStretch(1)
+    lg = QLabel()
+    if os.path.isfile(logo_path()):
+        lg.setPixmap(QIcon(logo_path()).pixmap(QSize(22, 22)))
+    co.addWidget(lg)
+    co.addWidget(label(f'{COMPANY} ({COMPANY_SHORT}) · {COMPANY_CITY}', wrap=False))
+    co.addStretch(1)
+    v.addLayout(co)
     by = label(f'Designed and programmed by <b>{AUTHOR}</b>')
     by.setTextFormat(Qt.TextFormat.RichText)
     by.setAlignment(Qt.AlignmentFlag.AlignCenter)

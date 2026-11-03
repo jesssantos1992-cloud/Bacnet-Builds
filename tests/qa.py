@@ -70,7 +70,7 @@ while time.time() < end and any(t.busy or (not t.live and not t.P) for t in w.TB
     pump(0.2)
 tabs = [t for t in w.TB if not t.live]
 print('loaded', [(t.n, len(t.P)) for t in tabs])
-V = ['p', 'f', 'd', 'w', 't', 's', 'o', 'g', 'a', 'n', 'm', 'b', 'c', 'x']
+V = ['p', 'f', 'd', 'w', 'h', 'e', 't', 's', 'o', 'g', 'a', 'n', 'm', 'b', 'c', 'x']
 for theme in ('dark', 'light'):
     w.set_theme(theme)
     for size in ((1500, 950), (1100, 680)):

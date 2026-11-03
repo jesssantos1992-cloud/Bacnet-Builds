@@ -10,7 +10,7 @@ import math
 import re
 import time
 
-from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QPointF, QRectF, QSizeF, Qt, QTimer
+from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QPointF, QRectF, QSizeF, Qt, QTimer, QUrl
 from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen, QPolygonF,
                            QTextDocument)
 from PySide6.QtSvg import QSvgRenderer
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 import bi_core as C
 import bi_points
 import bi_ui as U
-from bi_common import (CellGrid, HighlightDelegate, Page, Table, colors, find_href, link_finds, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
+from bi_common import (COMPANY, COMPANY_CITY, COMPANY_SHORT, DOC_CSS, TAGLINE, logo_data_uri, logo_path, CellGrid, HighlightDelegate, Page, Table, colors, find_href, link_finds, semibold, flow_row, colors_light, csv_text, dev_name, doc, esc, heading, html_table, is_dark,
                        label, stamp, summary_row)
 
 VN = C.VN
@@ -152,6 +152,12 @@ class FindingsView(BaseView):
         super().__init__(win)
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        self.tiles = QWidget()
+        self.tl = QHBoxLayout(self.tiles)
+        self.tl.setContentsMargins(22, 16, 22, 0)
+        self.tl.setSpacing(12)
+        v.addWidget(self.tiles)
         self.tb = QTextBrowser()
         self.tb.setFrameShape(QFrame.Shape.NoFrame)
         self.tb.document().setDocumentMargin(22)
@@ -160,6 +166,25 @@ class FindingsView(BaseView):
         self._last = None
 
     def refresh(self):
+        w, F = self.win, self.win.FD
+        while self.tl.count():
+            x = self.tl.takeAt(0).widget()
+            if x:
+                x.setParent(None)
+                x.deleteLater()
+        cs = {s: sum(1 for f in F if f['s'] == s) for s in ('SERIOUS', 'WARNING')}
+        weak = sum(1 for h in F.hl or [] if h['rate'] != 'Good')
+        wait = sum(1 for a in F.al or [] if a['need'] and not a['ack'])
+        for big, t, small, k, tone in [
+                (C.locale_int(len(w.P)), 'Packets', w.ac.n if w.ac else '', 'p', None),
+                (len(F.dv or []), 'Devices', f"{len(F.nets or [])} networks", 'd', None),
+                (cs['SERIOUS'] + cs['WARNING'], 'Problems', f"{cs['SERIOUS']} serious · {cs['WARNING']} warnings", None,
+                 'se' if cs['SERIOUS'] else 'wa' if cs['WARNING'] else 'no'),
+                (len(F.al or []), 'Alarms & events', f'{wait} waiting' if wait else 'none waiting', 'e', 'wa' if wait else None),
+                (C.locale_int(len(F.vc or [])), 'Value changes', f"{len({(e['key'], e['obj']) for e in F.pts or []})} points", 'h', None),
+                (weak, 'Devices to check', f"of {len(F.hl or [])} scored", 's', 'wa' if weak else None)]:
+            self.tl.addWidget(StatTile(w, big, t, small, k, tone), 1)
+        self.tiles.setVisible(bool(w.ac))
         h = findings_html(self.win, self.win.FD)
         if h != self._last:
             y = self.tb.verticalScrollBar().value()
@@ -196,6 +221,35 @@ class FindingsView(BaseView):
 
 
 # ================================================================ devices --
+class StatTile(QFrame):
+    """A number at the top of Findings; click it to open the view behind it."""
+
+    def __init__(self, win, big, title, small, key=None, tone=None):
+        super().__init__()
+        self.win, self.key = win, key
+        c = colors()
+        self.setObjectName('stat')
+        col = c[tone] if tone else c['fg']
+        self.setStyleSheet(f"QFrame#stat{{background:{c['hd']};border-radius:12px;border-top:3px solid {c[tone] if tone else c['ac']}}}"
+                           f"QFrame#stat:hover{{background:{c['bd'] if key else c['hd']}}}")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(14, 10, 14, 10)
+        v.setSpacing(0)
+        b = label(str(big), bold=True, size=20, wrap=False)
+        b.setStyleSheet(f'color:{col};background:transparent')
+        v.addWidget(b)
+        for x in (label(title, bold=True, wrap=False), label(small, muted=True, wrap=False)):
+            x.setStyleSheet('background:transparent')
+            v.addWidget(x)
+        if key:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setToolTip('Open ' + title)
+
+    def mouseReleaseEvent(self, ev):
+        if self.key and ev.button() == Qt.MouseButton.LeftButton:
+            self.win.goto(self.key)
+
+
 def device_tree(F):
     """{gateway: {network: [devices]}} plus the directly connected devices (the original's rdv)."""
     D = sorted(F.dv or [], key=lambda d: d['id'])
@@ -450,9 +504,10 @@ class ChangesView(BaseView):
         v.addLayout(row)
         self.tbl = Table(['Time', 'From', 'To', 'Action', 'Point', 'New value', 'Priority', 'Result'])
         self.tbl.rowActivated.connect(self.go)
-        v.addWidget(self.tbl, 1)
+        v.addWidget(self.tbl, 100)
         self.more = hint('')
         v.addWidget(self.more)
+        v.addStretch(1)
         self.wf.currentIndexChanged.connect(self.refresh)
         self.wq.textChanged.connect(self.refresh)
 
@@ -502,6 +557,7 @@ class ChangesView(BaseView):
                          (res, {'fg': c['se'] if bad else c['no'] if res == 'accepted' else c['mu'], 'bold': bool(bad)})])
             data.append(f"no == {w['no']}")
         self.tbl.fill(rows, data)
+        self.tbl.snug()
         self.more.setText('Showing the first 3,000. Save as a spreadsheet for the full list.' if len(R) > 3000 else '')
         self._stale = False
 
@@ -608,8 +664,11 @@ class ResponseView(PageView):
         if bad:
             pills.append((f"{C.pl(bad, 'device')} to check", 'WARNING'))
         pills.append((f"{C.pl(len(L), 'device')} measured", 'NOTE'))
+        weak = sum(1 for h in win.FD.hl or [] if h['rate'] != 'Good')
+        if weak:
+            pills.append((f"{C.pl(weak, 'device')} rated Fair or Poor", 'WARNING'))
         p.add(summary_row('No request / answer pairs found' if not L else 'Some devices are slow or silent' if bad else
-                          'Everything answered promptly', pills))
+                          'Answers are prompt, but some devices need a look' if weak else 'Everything answered promptly', pills))
         p.add(hint('Each request is matched to its answer (same two devices, same request number) and the wait is measured. '
                    'Controllers usually answer in well under half a second; a typical time over 1 second, or many unanswered '
                    'requests, points to an overloaded device or a poor connection. Double-click a row to see its packets.'))
@@ -1804,13 +1863,17 @@ def rep_model(win):
             'notes': [{'no': r.no, 't': C.tofixed(r.t - win.T0, 3), 'info': r.info, 'note': r.note or ''} for r in P if r.bm]}
 
 
-def html_report(win, info=None):
-    """info: the customer, site, technician and notes of a site report."""
+def html_report(win, info=None, logo=None):
+    """info: the customer, site, technician and notes of a site report. logo: the image source for the
+    company logo (a data URI by default, so the saved page works on its own)."""
     R = rep_model(win)
     H = lambda x: win.labels.hl(str(x), True)  # noqa: E731
     info = info or {}
     who_ = ''.join(f'<tr><td><b>{t}</b>&nbsp;&nbsp;</td><td>{esc(info[k])}</td></tr>' for k, t in SiteReportDialog.FIELDS if info.get(k))
-    b = (f'<div style="max-width:900px"><h1>BACnet {"site" if info else "network"} report</h1>' + (f'<table>{who_}</table>' if who_ else '') +
+    logo = logo_data_uri() if logo is None else logo
+    b = ('<div style="max-width:900px"><table class="brand"><tr>' + (f'<td><img src="{logo}" width="48" height="48"></td>' if logo else '') +
+         f'<td><div class="co">{esc(COMPANY)} ({COMPANY_SHORT})</div><div class="tagl">{esc(TAGLINE)} · {esc(COMPANY_CITY)}</div></td></tr></table>'
+         f'<h1>BACnet {"site" if info else "network"} report</h1>' + (f'<table>{who_}</table>' if who_ else '') +
          f'<p class="mu">{esc(R["name"])} · {esc(R["when"])} · '
          f'{C.locale_int(R["pk"])} packets over {esc(R["du"])} ({esc(R["pr"])})</p>' +
          (f'<h2>Work done</h2><p>{esc(info["notes"])}</p>' if info.get('notes') else '') +
@@ -1855,8 +1918,8 @@ def html_report(win, info=None):
     if R['notes']:
         b += '<h2>Notes and bookmarked packets</h2>' + html_table(['Packet', 'Time (s)', 'What', 'Note'],
              [[n['no'], n['t'], H(n['info']), esc(n['note'])] for n in R['notes']])
-    b += ('<p class="mu" style="margin-top:30px">Created with BACnet Inspector. Findings are based only on what was visible in this '
-          'capture; a device that stayed silent is not listed.</p></div>')
+    b += (f'<p class="foot">Prepared by {esc(COMPANY)} ({COMPANY_SHORT}), {esc(COMPANY_CITY)}, with BACnet Inspector. Findings are '
+          'based only on what was visible in this capture; a device that stayed silent is not listed.</p></div>')
     return doc('Network report – ' + R['name'], b)
 
 
@@ -1906,10 +1969,14 @@ class PointChart(QWidget):
         self.win = win
         self.e = None
         self.cats = []
+        self.zoom = None                         # (from, to) time while zoomed in
+        self.hover = self.drag = None
         self.setMinimumHeight(230)
         self.setMouseTracking(True)
 
     def show_point(self, e):
+        if e is not self.e:
+            self.zoom = None
         self.e = e
         self.cats = []
         if e and e['s'] and not any(s[2] is not None for s in e['s']):    # text values: one level per value
@@ -1928,7 +1995,11 @@ class PointChart(QWidget):
     def scale(self):
         S = self.series()
         ts = [x[0] for x in S] + [w[0] for w in self.e['w']]
-        t0, t1 = min(ts), max(ts)
+        t0, t1 = self.zoom or (min(ts), max(ts))
+        if self.zoom:                            # keep the step that started before the window
+            i = next((i for i, x in enumerate(S) if x[0] >= t0), len(S))
+            S = S[max(0, i - 1):]
+            S = [x for x in S if x[0] <= t1] or S[:1]
         vs = [x[1] for x in S] or [0.0]
         lo, hi = min(vs), max(vs)
         if hi == lo:
@@ -1976,10 +2047,12 @@ class PointChart(QWidget):
             a = Qt.AlignmentFlag.AlignLeft if i == 0 else Qt.AlignmentFlag.AlignRight if i == 4 else Qt.AlignmentFlag.AlignHCenter
             r = QRectF(x if i == 0 else x - 120 if i == 4 else x - 60, h + 4, 120, 18)
             p.drawText(r, a | Qt.AlignmentFlag.AlignVCenter, rel(self.win, t))
+        p.save()
+        p.setClipRect(QRectF(self.M_L, 0, self.width() - self.M_L - self.M_R, self.height()))
         p.setPen(QPen(QColor(c['ac']), 1.8))
         last = None
         for t, v, _s in S:
-            q = self.xy(t, v, sc)
+            q = self.xy(max(t, t0), v, sc)
             if last is not None:
                 p.drawLine(last, QPointF(q.x(), last.y()))
                 p.drawLine(QPointF(q.x(), last.y()), q)
@@ -1995,6 +2068,29 @@ class PointChart(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(wc)
             p.drawPolygon(QPolygonF([QPointF(x - 5, self.M_T - 8), QPointF(x + 5, self.M_T - 8), QPointF(x, self.M_T)]))
+        p.restore()
+        if self.drag and abs(self.drag[1] - self.drag[0]) > 3:      # the stretch being dragged out
+            band = QColor(c['ac'])
+            band.setAlpha(40)
+            p.fillRect(QRectF(min(self.drag), self.M_T, abs(self.drag[1] - self.drag[0]), h - self.M_T), band)
+        elif self.hover is not None and S and self.M_L <= self.hover <= self.width() - self.M_R:
+            t = t0 + (self.hover - self.M_L) / (self.width() - self.M_L - self.M_R) * dt
+            cur = next((x for x in reversed(S) if x[0] <= t), S[0])
+            p.setPen(QPen(QColor(c['mu']), 1, Qt.PenStyle.DotLine))
+            p.drawLine(QPointF(self.hover, self.M_T), QPointF(self.hover, h))
+            txt = f"{rel(self.win, t)}   {cur[2][1]}"
+            tw = fm.horizontalAdvance(txt) + 16
+            x = min(self.hover + 8, self.width() - self.M_R - tw)
+            bg = QColor(c['card'])
+            p.setPen(QPen(QColor(c['bd'])))
+            p.setBrush(bg)
+            p.drawRoundedRect(QRectF(x, self.M_T + 4, tw, 22), 6, 6)
+            p.setPen(QColor(c['fg']))
+            p.drawText(QRectF(x, self.M_T + 4, tw, 22), Qt.AlignmentFlag.AlignCenter, txt)
+        if self.zoom:
+            p.setPen(QColor(c['mu']))
+            p.drawText(QRectF(self.M_L, 0, self.width() - self.M_L - self.M_R, self.M_T + 2),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, 'Zoomed in · right-click to zoom out')
         p.end()
 
     def near(self, pos):
@@ -2019,8 +2115,35 @@ class PointChart(QWidget):
         return best
 
     def mouseMoveEvent(self, ev):
-        n = self.near(ev.position())
-        self.setToolTip((n[0] + '\nDouble-click to see this packet') if n else '')
+        x = ev.position().x()
+        if self.drag:
+            self.drag = (self.drag[0], x)
+        else:
+            n = self.near(ev.position())
+            self.setToolTip((n[0] + '\nDouble-click to see this packet') if n else 'Drag across the graph to zoom in')
+        self.hover = x
+        self.update()
+
+    def leaveEvent(self, _ev):
+        self.hover = None
+        self.update()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and self.e and (self.e['s'] or self.e['w']):
+            self.drag = (ev.position().x(), ev.position().x())
+        elif ev.button() == Qt.MouseButton.RightButton and self.zoom:
+            self.zoom = None
+            self.update()
+
+    def mouseReleaseEvent(self, ev):
+        d, self.drag = self.drag, None
+        if d and abs(d[1] - d[0]) > 8:
+            sc = self.scale()
+            w = self.width() - self.M_L - self.M_R
+            a, b = sorted(sc[1] + (max(self.M_L, min(x, self.M_L + w)) - self.M_L) / w * sc[2] for x in d)
+            if b - a > 1e-3:
+                self.zoom = (a, b)
+        self.update()
 
     def mouseDoubleClickEvent(self, ev):
         n = self.near(ev.position())
@@ -2156,7 +2279,10 @@ class AlarmsView(BaseView):
         v.addLayout(row)
         self.tbl = Table(['Time', 'From', 'Point', 'Event', 'State', 'Priority', 'Message', 'Acknowledged'])
         self.tbl.rowActivated.connect(self.go)
-        v.addWidget(self.tbl, 1)
+        v.addWidget(self.tbl, 100)
+        self.none = hint('')
+        v.addWidget(self.none)
+        v.addStretch(1)
         self.f.currentIndexChanged.connect(self.refresh)
 
     @staticmethod
@@ -2193,6 +2319,10 @@ class AlarmsView(BaseView):
                          (f"{a['was']} → {a['now']}", {'fg': c['se'] if bad else c['mu'], 'bold': bad}), a['pri'], a['msg'], ack])
             data.append(f"no == {a['no']}")
         self.tbl.fill(rows, data)
+        self.tbl.snug()
+        self.tbl.setVisible(bool(rows))
+        self.none.setText('' if rows else 'Nothing to show. Alarms appear here when a controller sends an event notification '
+                          '(for example a point going into alarm, or a trend log telling a front-end its buffer is full).')
         self._stale = False
 
     def formats(self):
@@ -2358,7 +2488,11 @@ def pdf_report(win, info):
     w.setCreator('BACnet Inspector')
     d = QTextDocument()
     d.setDefaultFont(QFont('Segoe UI', 10))
-    d.setHtml(html_report(win, info))
+    d.setDefaultStyleSheet(DOC_CSS)
+    img = QImage(logo_path())
+    if not img.isNull():
+        d.addResource(QTextDocument.ResourceType.ImageResource, QUrl('accs-logo.png'), img)
+    d.setHtml(html_report(win, info, 'accs-logo.png' if not img.isNull() else ''))
     d.setPageSize(QSizeF(w.width(), w.height()))
     d.print_(w)
     del w

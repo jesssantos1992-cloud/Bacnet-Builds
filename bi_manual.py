@@ -360,7 +360,8 @@ reported a different value, with the old and new value.</p>
 ch('history', 'Point history', 'Analyse a capture', """
 <p><b>Point history</b> lists every point whose value appears in the capture, with how often it updated, how often it
 changed, and its low, high and latest value. Pick a point to see its graph. Orange markers are writes: hover to see who
-wrote what, and double-click the graph or a row to see the packets.</p>
+wrote what, and double-click the graph or a row to see the packets. Hover over the graph to read the value at any
+time, drag across it to zoom in, and right-click to zoom out.</p>
 <p>The values come from COV notifications and writes. A point that is only polled with Read Property is not listed.</p>
 <p>Under <b>Show</b> choose the present value, every property, or only points that were written. Edit &gt; <b>Import point
 names…</b> reads a CSV with columns Device, Object and Name, and the names then appear here, on Changes and on Alarms.

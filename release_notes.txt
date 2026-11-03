@@ -1,10 +1,6 @@
-- Point history: new page with a graph of each point's value over the capture, with writes marked.
-- Alarms & events: new page showing every alarm, its state and whether it was acknowledged.
-- Changes: new "Value changes" option shows points changing by themselves.
-- Device health: a score for each device on Response times & errors, and in reports.
-- Site report (PDF): a report with customer, site and work done, to hand over after a visit.
-- Compare: before and after count of problems fixed, still there and new.
-- Site profiles: save a site and check later visits against it.
-- Import point names from a CSV file.
-- Long capture: save to rolling files in a folder, with a log of every alert.
-- Live alerts now include alarms.
+- New look in ACCS colours: charcoal sidebar with the ACCS logo, ACCS green throughout.
+- Reports and the PDF site report carry the ACCS name and logo.
+- Findings opens with a row of numbers (packets, devices, problems, alarms, value changes, devices to check); click one to open it.
+- Point history graph: hover to read the value at any time, drag to zoom in, right-click to zoom out.
+- Tables size their columns better, and short lists no longer fill the page with empty space.
+- Response times: the heading now agrees with the device health scores.

@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLay
                                QToolTip, QVBoxLayout, QWidget)
 
 AUTHOR = 'Jesse Santos'        # shown in Help > About, the manual and the About help page
+# the company the app is made for: its name, logo colour (ACCS green) and the charcoal of its website
+COMPANY, COMPANY_SHORT, TAGLINE, COMPANY_CITY = 'Air Conditioning Control Systems', 'ACCS', 'Intelligent Buildings', 'Anaheim, California'
+BRAND, CHARCOAL = '#81c35c', '#26292c'
 MONO = 'Cascadia Mono, Consolas, monospace'
 ROW_H = 28                     # tree and table row height
 # type scale (points): display numbers, page titles, section headings; body text is the app font (10 pt)
@@ -39,13 +42,10 @@ def colors():
     """The app's accent / status colours, matching the original design, for light or dark mode."""
     if is_dark():
         return {'bg': '#1c1c1e', 'fg': '#f5f5f7', 'mu': '#98989d', 'bd': '#38383a', 'hd': '#2a2a2c', 'b': '#1e2631',
-                'm': '#1d2a22', 'bad': '#3b1f22', 'ac': '#0a84ff', 'se': '#ff453a', 'wa': '#ff9f0a', 'no': '#30d158',
+                'm': '#1d2a22', 'bad': '#3b1f22', 'ac': BRAND, 'acfg': '#10200a', 'se': '#ff453a', 'wa': '#ff9f0a', 'no': '#30d158',
                 'hit': '#fde68a', 'ip': '#23324f', 'mac': '#4a3416', 'net': '#3a2350', 'id': '#163d24',
-                'card': '#2a2a2c', 'side': '#252527', 'hair': 'rgba(255,255,255,0.08)'}
-    return {'bg': '#ffffff', 'fg': '#1d1d1f', 'mu': '#6e6e73', 'bd': '#e3e3e8', 'hd': '#f5f5f7', 'b': '#f3f7ff',
-            'm': '#f3faf6', 'bad': '#ffecec', 'ac': '#0071e3', 'se': '#d70015', 'wa': '#b86e00', 'no': '#248a3d',
-            'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb',
-            'card': '#ffffff', 'side': '#eaeaee', 'hair': 'rgba(0,0,0,0.08)'}
+                'card': '#2a2a2c', 'side': '#1f2124', 'hair': 'rgba(255,255,255,0.08)'}
+    return colors_light()
 
 
 SEV_LABEL = {'SERIOUS': 'serious', 'WARNING': 'warnings', 'NOTE': 'notes'}
@@ -261,16 +261,36 @@ class HighlightDelegate(QStyledItemDelegate):
 
 
 def colors_light():
-    return {'bg': '#ffffff', 'fg': '#1d1d1f', 'mu': '#6e6e73', 'bd': '#e3e3e8', 'hd': '#f5f5f7', 'b': '#f3f7ff',
-            'm': '#f3faf6', 'bad': '#ffecec', 'ac': '#0071e3', 'se': '#d70015', 'wa': '#b86e00', 'no': '#248a3d',
+    """Light mode. The accent is a deeper ACCS green so text and links on white stay readable."""
+    return {'bg': '#ffffff', 'fg': '#1d1d1f', 'mu': '#5f6368', 'bd': '#e3e3e8', 'hd': '#f5f5f7', 'b': '#f3f7ff',
+            'm': '#f3faf6', 'bad': '#ffecec', 'ac': '#3e7b22', 'acfg': '#ffffff', 'se': '#d70015', 'wa': '#b86e00', 'no': '#248a3d',
             'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb',
-            'card': '#ffffff', 'side': '#eaeaee', 'hair': 'rgba(0,0,0,0.08)'}
+            'card': '#ffffff', 'side': CHARCOAL, 'hair': 'rgba(0,0,0,0.08)'}
+
+
+def logo_path():
+    import bacnet_live
+    import os
+    return os.path.join(bacnet_live.BASE, 'accs_logo.png')
+
+
+def logo_data_uri():
+    """The ACCS logo for saved web pages, which must work on their own."""
+    import base64
+    try:
+        with open(logo_path(), 'rb') as f:
+            return 'data:image/png;base64,' + base64.b64encode(f.read()).decode()
+    except OSError:
+        return ''
 
 
 # ------------------------------------------------------- saved web pages --
 DOC_CSS = """
 body{font:14px/1.5 'Segoe UI',system-ui,sans-serif;color:#1d1d1f;background:#fff;margin:0;padding:18px 24px}
-h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:26px 0 8px;border-bottom:2px solid #e3e3e8;padding-bottom:4px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:26px 0 8px;border-bottom:2px solid #81c35c;padding-bottom:4px}
+.brand{border-bottom:4px solid #81c35c;padding-bottom:8px;margin-bottom:14px}.brand td{border:0;padding:0 10px 0 0;vertical-align:middle}
+.co{font-size:17px;font-weight:700;color:#26292c}.tagl{font-size:12px;color:#3e7b22;font-weight:600}
+.foot{margin-top:30px;border-top:1px solid #e3e3e8;padding-top:8px;font-size:12px;color:#6e6e73}
 h3{font-size:15px;margin:20px 0 8px}.mu{color:#6e6e73}
 table{border-collapse:collapse;margin:6px 0 14px;font-size:13px}
 th,td{padding:4px 10px;text-align:left;border-bottom:1px solid #e3e3e8;vertical-align:top}
@@ -458,9 +478,8 @@ class Table(QTableWidget):
                 self.setItem(i, j, it)
         if autosize and len(rows) <= 2000:
             self.resizeColumnsToContents()
-            for j in range(self.columnCount() - 1):
-                if self.columnWidth(j) > 420:
-                    self.setColumnWidth(j, 420)
+            for j in range(self.columnCount() - 1):              # breathing room; long text is cut, hover shows it all
+                self.setColumnWidth(j, min(self.columnWidth(j) + 14, 360))
         self.setUpdatesEnabled(True)
 
     def fit_height(self, max_rows=None):
@@ -472,6 +491,15 @@ class Table(QTableWidget):
         self.setMinimumHeight(min(h, 100000))
         self.setMaximumHeight(min(h, 100000))
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff if max_rows is None else Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+    def snug(self, limit=14):
+        """A short list takes only the room it needs; a long one fills the page (put a small stretch after the table)."""
+        if self.rowCount() <= limit:
+            self.fit_height()
+        else:
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     def row_data(self):
         r = self.currentRow()
