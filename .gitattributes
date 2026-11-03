@@ -9,3 +9,5 @@
 *.exe binary
 *.pcap binary
 *.pcapng binary
+*.sh  text eol=lf
+*.yml text eol=lf
