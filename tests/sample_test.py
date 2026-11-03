@@ -117,6 +117,16 @@ w.upd_bar()
 check(w.ub_go.text() == 'Update now', 'Windows shows Update now')
 w.ub.hide()
 
+import bi_ui  # noqa: E402
+es = bi_ui.EmptyState('wave', 'Nothing captured yet', 'Response times & errors fills in as packets arrive. Start the live '
+                      'capture, or open a saved capture. ' * 2, [('OK', lambda: None)])
+es.resize(900, 600)
+es.show()
+pump(0.2)
+need = es.s.fontMetrics().lineSpacing() * 3
+check(es.s.height() >= es.s.heightForWidth(es.s.width()) and es.s.height() >= need, f'empty page text is not cut off ({es.s.height()} px)')
+es.close()
+
 w.close()
 pump(0.3)
 print('exceptions:', ERR + [f'check failed: {b}' for b in BAD])

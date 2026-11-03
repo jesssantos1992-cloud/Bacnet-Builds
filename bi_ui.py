@@ -578,6 +578,7 @@ class EmptyState(QWidget):
         if text is not None:
             self.s.setText(text)
             self.s.setVisible(bool(text))
+            self.s.setFixedHeight(self.s.heightForWidth(self.s.width()) if text else 0)   # every wrapped line, not just the first
         self.busy.setVisible(busy)
         if buttons is not None:
             while self.bl.count():

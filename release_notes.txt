@@ -1,9 +1,1 @@
-- New name: BACnet Inspector is now Wirescope. Your settings, names and notes are kept, and the update installs over the old version.
-- Light and dark mode fixed: the title bar now always matches the theme, and the sidebar is light in light mode.
-- Overrides: Point history shows which priority holds each written point, and Findings warns about points left overridden at priority 1 to 8.
-- BBMD checks: Findings now spots foreign devices that let their registration run out, and broadcasts arriving twice through two BBMDs.
-- The network map is now in the web report and the PDF site report.
-- Export a device's points as an EDE file, the point list other BACnet tools import.
-- Help > Open sample capture: a made-up building to try every page without a site.
-- Changes explains an empty list (for example, a switched network only shows this PC's own writes).
-- Mac: a Download update button gets the new version.
+- Fixed: on empty pages the line under the heading was cut off when it wrapped onto a second line.
