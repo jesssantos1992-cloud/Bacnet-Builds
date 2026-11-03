@@ -1,4 +1,4 @@
-﻿- New look in ACCS colours: charcoal sidebar with the ACCS logo, ACCS green throughout.
+- New look in ACCS colours: charcoal sidebar with the ACCS logo, ACCS green throughout.
 - Reports and the PDF site report carry the ACCS name and logo.
 - Findings opens with a row of numbers (packets, devices, problems, alarms, value changes, devices to check); click one to open it.
 - Point history graph: hover to read the value at any time, drag to zoom in, right-click to zoom out.
