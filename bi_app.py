@@ -801,8 +801,8 @@ class LivePanel(QWidget):
 
 # ============================================================ side bar icons --
 def side_icon(k):
-    """Sidebar icon: a thin line drawing in ACCS green (the sidebar is always charcoal)."""
-    return U.icon(k, BRAND, 18, 1.7)
+    """Sidebar icon: a thin line drawing in ACCS green (deeper green on the light sidebar)."""
+    return U.icon(k, colors()['sic'], 18, 1.7)
 
 
 SIDE = [(None, None), ('p', 'Packets'), ('Analyze', None), ('f', 'Findings'), ('d', 'Devices'), ('w', 'Changes'),
@@ -1078,16 +1078,15 @@ class MainWindow(QMainWindow):
     def style_chrome(self):
         """Colours of the sidebar, search field and banners (again after a theme change)."""
         c = colors()
-        sel = 'rgba(129,195,92,0.24)'
         self.sidew.setStyleSheet(
             f"QFrame#sidew{{background:{c['side']};border-right:3px solid {BRAND}}}"
-            'QFrame#sidew QLabel{color:#f2f3f4}'
+            f"QFrame#sidew QLabel{{color:{c['sfg']}}}"
             'QListWidget{background:transparent;border:0;outline:0}'
-            "QListWidget::item{border-radius:7px;padding:0px 6px;margin:0px 10px;color:#e6e8ea}"
-            'QListWidget::item:hover:!selected:enabled{background:rgba(255,255,255,0.08)}'
-            f"QListWidget::item:selected{{background:{sel};color:#ffffff}}"
-            "QListWidget::item:disabled{color:#8f959b;background:transparent;padding-left:8px}")
-        self.brand_sub.setStyleSheet('color:#a9afb5')
+            f"QListWidget::item{{border-radius:7px;padding:0px 6px;margin:0px 10px;color:{c['sfg']}}}"
+            f"QListWidget::item:hover:!selected:enabled{{background:{c['shov']}}}"
+            f"QListWidget::item:selected{{background:{c['ssel']};color:{c['sfg']}}}"
+            f"QListWidget::item:disabled{{color:{c['smu']};background:transparent;padding-left:8px}}")
+        self.brand_sub.setStyleSheet(f"color:{c['smu']}")
         for k, it in self.side_items.items():
             it.setIcon(side_icon(k))
         self.find_b.setIcon(U.icon('search', c['mu'], 16))
@@ -2402,6 +2401,7 @@ class MainWindow(QMainWindow):
         U.apply_palette(app)
         self.style_chrome()
         U.style_titlebar(self)
+        QTimer.singleShot(250, lambda: U.style_titlebar(self))     # again once Windows has settled the new colours
         self.tipper.update()
         self.pk.model.retheme()
         self.pk.model.layoutChanged.emit()

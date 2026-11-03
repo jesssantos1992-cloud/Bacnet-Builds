@@ -44,7 +44,8 @@ def colors():
         return {'bg': '#1c1c1e', 'fg': '#f5f5f7', 'mu': '#98989d', 'bd': '#38383a', 'hd': '#2a2a2c', 'b': '#1e2631',
                 'm': '#1d2a22', 'bad': '#3b1f22', 'ac': BRAND, 'acfg': '#10200a', 'se': '#ff453a', 'wa': '#ff9f0a', 'no': '#30d158',
                 'hit': '#fde68a', 'ip': '#23324f', 'mac': '#4a3416', 'net': '#3a2350', 'id': '#163d24',
-                'card': '#2a2a2c', 'side': '#1f2124', 'hair': 'rgba(255,255,255,0.08)'}
+                'card': '#2a2a2c', 'side': '#1f2124', 'sfg': '#e6e8ea', 'smu': '#8f959b', 'sic': BRAND,
+                'ssel': 'rgba(129,195,92,0.24)', 'shov': 'rgba(255,255,255,0.08)', 'hair': 'rgba(255,255,255,0.08)'}
     return colors_light()
 
 
@@ -265,7 +266,8 @@ def colors_light():
     return {'bg': '#ffffff', 'fg': '#1d1d1f', 'mu': '#5f6368', 'bd': '#e3e3e8', 'hd': '#f5f5f7', 'b': '#f3f7ff',
             'm': '#f3faf6', 'bad': '#ffecec', 'ac': '#3e7b22', 'acfg': '#ffffff', 'se': '#d70015', 'wa': '#b86e00', 'no': '#248a3d',
             'hit': '#fde68a', 'ip': '#d6e2fb', 'mac': '#f8e3c7', 'net': '#ead9f9', 'id': '#d0eedb',
-            'card': '#ffffff', 'side': CHARCOAL, 'hair': 'rgba(0,0,0,0.08)'}
+            'card': '#ffffff', 'side': '#f1f4ef', 'sfg': '#26292c', 'smu': '#6b7076', 'sic': '#3e7b22',
+            'ssel': 'rgba(62,123,34,0.16)', 'shov': 'rgba(0,0,0,0.05)', 'hair': 'rgba(0,0,0,0.08)'}
 
 
 def logo_path():

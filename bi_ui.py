@@ -65,8 +65,11 @@ def style_titlebar(w):
         v = ctypes.c_int(1 if is_dark() else 0)
         dw.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(v), 4)                 # dark title bar text / buttons
         col = w.palette().color(QPalette.ColorRole.Window)
+        if (col.lightness() < 128) != is_dark():          # the palette has not caught up with the new theme yet
+            col = QColor('#202020' if is_dark() else '#f3f3f3')
         cref = ctypes.c_int(col.red() | col.green() << 8 | col.blue() << 16)
         dw.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(cref), 4)              # caption colour (Windows 11 only)
+        w.caption_color = col.name()                                           # what was asked for (Windows cannot report it back)
         rnd = ctypes.c_int(2)
         dw.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(rnd), 4)               # rounded corners
     except (AttributeError, OSError):
