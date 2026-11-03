@@ -176,7 +176,7 @@ class FindingsView(BaseView):
         weak = sum(1 for h in F.hl or [] if h['rate'] != 'Good')
         wait = sum(1 for a in F.al or [] if a['need'] and not a['ack'])
         for big, t, small, k, tone in [
-                (C.locale_int(len(w.P)), 'Packets', w.ac.n if w.ac else '', 'p', None),
+                (C.locale_int(len(w.P)), 'Packets', f'over {C.span(w.P)[0]}' if w.P else '', 'p', None),
                 (len(F.dv or []), 'Devices', f"{len(F.nets or [])} networks", 'd', None),
                 (cs['SERIOUS'] + cs['WARNING'], 'Problems', f"{cs['SERIOUS']} serious · {cs['WARNING']} warnings", None,
                  'se' if cs['SERIOUS'] else 'wa' if cs['WARNING'] else 'no'),

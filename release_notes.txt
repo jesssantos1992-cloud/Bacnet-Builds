@@ -1,6 +1,7 @@
-- New look in ACCS colours: charcoal sidebar with the ACCS logo, ACCS green throughout.
+﻿- New look in ACCS colours: charcoal sidebar with the ACCS logo, ACCS green throughout.
 - Reports and the PDF site report carry the ACCS name and logo.
 - Findings opens with a row of numbers (packets, devices, problems, alarms, value changes, devices to check); click one to open it.
 - Point history graph: hover to read the value at any time, drag to zoom in, right-click to zoom out.
 - Tables size their columns better, and short lists no longer fill the page with empty space.
 - Response times: the heading now agrees with the device health scores.
+- Every analysis page shows how long the capture is, with its start and end time; Findings and Packets show it too.

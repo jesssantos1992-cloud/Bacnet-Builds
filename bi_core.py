@@ -1463,6 +1463,26 @@ def pl(n, w) -> str:
     return f"{n} {w}{'' if n == 1 else 's'}"
 
 
+def length(s) -> str:
+    """How long a capture lasted: '45 seconds', '36.5 minutes', '2 h 15 min'."""
+    if s < 60:
+        return f"{jsround(s)} second{'' if jsround(s) == 1 else 's'}"
+    if s < 3600:
+        return f'{tofixed(s / 60, 1)} minutes'
+    h, m = divmod(int(round(s / 60)), 60)
+    return f'{h} h {m} min' if m else f'{h} h'
+
+
+def span(P):
+    """(length, 'Oct 6, 2026 10:49:30 → 11:26:01') of a capture, or None when it is empty."""
+    if not P:
+        return None
+    a, b = time.localtime(P[0].t), time.localtime(P[-1].t)
+    day = time.strftime('%b %d, %Y', a).replace(' 0', ' ')
+    end = time.strftime('%H:%M:%S', b) if a[:3] == b[:3] else time.strftime('%b %d, %Y %H:%M:%S', b).replace(' 0', ' ', 1)
+    return length(P[-1].t - P[0].t), f"{day} {time.strftime('%H:%M:%S', a)} → {end}"
+
+
 def gap(s) -> str:
     if 0 < s < 1:
         return f'{jsround(s * 1000)} ms'          # MS/TP devices talk many times a second ("every 0 s" before)

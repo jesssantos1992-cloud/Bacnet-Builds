@@ -1029,6 +1029,9 @@ class MainWindow(QMainWindow):
         ob.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         ob.clicked.connect(self.open_files)
         hl.addWidget(ob, 0, Qt.AlignmentFlag.AlignLeft)
+        self.span = label('', wrap=False, rich=True)      # how long the open capture is, on every analysis page
+        self.span.setToolTip('How long this capture lasted, from its first packet to its last')
+        hl.addWidget(self.span, 1)
         self.qbox = QLineEdit()
         self.qbox.setPlaceholderText('Display filter, e.g. device == 1001 && proto == "MS/TP"')
         self.qbox.setClearButtonEnabled(True)
@@ -1299,13 +1302,24 @@ class MainWindow(QMainWindow):
         self.header.setVisible(not disc)
         self.qbox.setVisible(k == 'p')
         self.st.setVisible(k == 'p')
+        self.span.setVisible(k != 'p')
+        self.show_span()
         self.live.setVisible(not disc and bool(self.ac and self.ac.live))
         if k != 'p' and w is not self.empty_view and hasattr(w, 'refresh'):
             w.refresh()
         self.update_back()
 
+    def show_span(self):
+        sp = C.span(self.P)
+        if not sp:
+            self.span.setText('')
+            return
+        live = ' so far' if self.ac and self.ac.live else ''
+        self.span.setText(f"⏱ <b>{sp[0]}{live}</b> &nbsp;·&nbsp; {esc(sp[1])} &nbsp;·&nbsp; {C.locale_int(len(self.P))} packets")
+
     def refresh_views(self):
         """The active capture or its analysis changed: update the current view and the badges."""
+        self.show_span()
         nf = len(self.FD)
         self.side_items['f'].setText('Findings' + (f'   ({nf})' if nf else ''))
         nd = len(self.FD.dv or [])
@@ -1663,7 +1677,10 @@ class MainWindow(QMainWindow):
         t = self.ac
         busy = f' – {t.busy}' if t and t.busy else ''
         if t:
-            self.st.setText(f'{C.locale_int(len(self.pk.V))} of {C.locale_int(len(self.P))} packets{busy}')
+            sp = C.span(self.P)
+            self.st.setText(f'{C.locale_int(len(self.pk.V))} of {C.locale_int(len(self.P))} packets'
+                            f"{' · ' + sp[0] if sp else ''}{busy}")
+            self.st.setToolTip(sp[1] if sp else '')
         else:
             self.st.setText('No file loaded')
 
@@ -1815,6 +1832,7 @@ class MainWindow(QMainWindow):
             self.live_dirty = True
             if self.ac is LT:
                 self.P, self.T0 = LT.P, LT.T0
+                self.show_span()
                 self.pk.show_list(True)
                 self.pk.relist()
                 if self.live.follow.isChecked():
