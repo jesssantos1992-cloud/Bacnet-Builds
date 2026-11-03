@@ -1,3 +1,4 @@
+- New name: BACnet Inspector is now Wirescope. Your settings, names and notes are kept, and the update installs over the old version.
 - Light and dark mode fixed: the title bar now always matches the theme, and the sidebar is light in light mode.
 - Overrides: Point history shows which priority holds each written point, and Findings warns about points left overridden at priority 1 to 8.
 - BBMD checks: Findings now spots foreign devices that let their registration run out, and broadcasts arriving twice through two BBMDs.

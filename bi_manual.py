@@ -36,7 +36,7 @@ def ch(cid, title, part, body):
 
 
 ch('welcome', 'Welcome', 'Start here', f"""
-<p>BACnet Inspector helps you see what is happening on a BACnet building-automation network and find problems
+<p>Wirescope helps you see what is happening on a BACnet building-automation network and find problems
 quickly. It works in two ways:</p>
 <ul>
 <li><b>Capture</b> – open a recording of the network traffic (a <i>.pcap</i> or <i>.pcapng</i> file), or record one
@@ -114,14 +114,14 @@ next time.</p>
 """)
 
 ch('open', 'Opening captures', 'Captures', f"""
-<p>BACnet Inspector reads <b>.pcap</b> and <b>.pcapng</b> files – the standard format written by Wireshark,
+<p>Wirescope reads <b>.pcap</b> and <b>.pcapng</b> files – the standard format written by Wireshark,
 tcpdump, most routers and BACnet tools, and by this app's own live capture.</p>
 <h3>Ways to open a file</h3>
 <ul>
 <li><b>Open capture</b> button, the <b>+</b> next to the tabs, or File &gt; Open capture ({k('Ctrl+O')}). You can
 pick several files at once.</li>
 <li>Drag files from File Explorer onto the window.</li>
-<li>In File Explorer, right-click a capture and choose <b>Open with &gt; BACnet Inspector</b> (offered when the option
+<li>In File Explorer, right-click a capture and choose <b>Open with &gt; Wirescope</b> (offered when the option
 was ticked during installation). If the app is already open, the file opens as a new tab in the same window.</li>
 </ul>
 <h3>Sample capture</h3>
@@ -722,7 +722,7 @@ ticked). When one is available, a blue bar appears:</p>
 <li><b>Later</b> – hides the bar until the next version.</li>
 </ul>
 <p>On a Mac the button is <b>Download update</b>: the new version downloads in the browser. Quit the app, open the
-downloaded .zip and drag BACnet Inspector into Applications, choosing Replace. (A Mac app can only update itself when it
+downloaded .zip and drag Wirescope into Applications, choosing Replace. (A Mac app can only update itself when it
 is signed with a paid Apple developer certificate.)</p>
 <p>Help &gt; <b>Check for updates…</b> checks straight away. Help &gt; <b>About</b> shows the version you have.</p>
 """)
@@ -782,7 +782,7 @@ Discover.</li>
 </ul>
 <h3>Scan finds no devices (BACnet/IP)</h3>
 <ul>
-<li>Windows Firewall may block the answers: allow BACnet Inspector on private / domain networks when Windows asks, or
+<li>Windows Firewall may block the answers: allow Wirescope on private / domain networks when Windows asks, or
 allow UDP port 47808.</li>
 <li>The PC must be on the same IP subnet as the devices, or use a <b>BBMD</b> in Discovery Options.</li>
 <li>If the PC has several network adapters, set <b>Send to</b> to the BACnet subnet's broadcast address.</li>
@@ -851,11 +851,11 @@ and stops if it detects that its address is already in use.</li>
 """)
 
 ch('about', 'About this program', 'Reference', f"""
-<p><b>BACnet Inspector</b> was designed and programmed by <b>{AUTHOR}</b>.</p>
+<p><b>Wirescope</b> (called BACnet Inspector before version 1.5) was designed and programmed by <b>{AUTHOR}</b>.</p>
 <p>It reads BACnet/IP and BACnet MS/TP captures, explains what is on the network in plain English, points out
 problems such as duplicate device IDs and duplicate network numbers, discovers devices and reads their points live,
 and can capture straight from an MS/TP trunk.</p>
-<p>Help &gt; <b>About BACnet Inspector</b> shows the version you have, and Help &gt; <b>What's new</b> lists what
+<p>Help &gt; <b>About Wirescope</b> shows the version you have, and Help &gt; <b>What's new</b> lists what
 changed in each release. See {go('updates', 'Updates')} for how new versions arrive.</p>
 <h3>Credits</h3>
 <ul>
@@ -899,13 +899,13 @@ def full_html():
     toc = ''.join(f'<li><a href="#{x}">{t}</a></li>' for x, t, _p, _b in CH)
     body = ''.join(f'<section id="{x}"><p class="part">{p.upper()}</p><h1>{t}</h1>{b}</section><hr>' for x, t, p, b in CH)
     body = re.sub(r'<span class="key">(.*?)</span>', r'<kbd>\1</kbd>', body)
-    return ('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>BACnet Inspector – User manual</title><style>'
+    return ('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Wirescope – User manual</title><style>'
             "body{font:15px/1.55 'Segoe UI',system-ui,sans-serif;max-width:860px;margin:30px auto;padding:0 20px;color:#1d1d1f}"
             'h1{font-size:26px;margin:4px 0 8px}h3{margin:22px 0 6px}a{color:#0071e3}code{background:#f0f0f2;padding:1px 4px;border-radius:4px}'
             'kbd{border:1px solid #c7c7cc;border-bottom-width:2px;border-radius:5px;padding:0 6px;background:#fff;font:600 13px "Segoe UI"}'
             '.note{background:#eef4ff;border-radius:10px;margin:14px 0}.part{color:#6e6e73;font-size:12px;font-weight:600;letter-spacing:.05em}'
             'td{vertical-align:top}hr{border:0;border-top:1px solid #e3e3e8;margin:30px 0}'
-            f'</style></head><body><h1>BACnet Inspector – User manual</h1><p class="part">BY {AUTHOR.upper()}</p><ol>{toc}</ol><hr>{body}</body></html>')
+            f'</style></head><body><h1>Wirescope – User manual</h1><p class="part">BY {AUTHOR.upper()}</p><ol>{toc}</ol><hr>{body}</body></html>')
 
 
 # ------------------------------------------------------------------ window --
@@ -914,7 +914,7 @@ class ManualWindow(QDialog):
 
     def __init__(self, win):
         super().__init__(win, Qt.WindowType.Window)
-        self.setWindowTitle('BACnet Inspector – User manual')
+        self.setWindowTitle('Wirescope – User manual')
         self.win = win
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -1069,7 +1069,7 @@ class ManualWindow(QDialog):
             QDesktopServices.openUrl(url)
 
     def save(self):
-        p, _ = QFileDialog.getSaveFileName(self, 'Save the manual', 'BACnet Inspector - User manual.html', 'Web page (*.html)')
+        p, _ = QFileDialog.getSaveFileName(self, 'Save the manual', 'Wirescope - User manual.html', 'Web page (*.html)')
         if not p:
             return
         if not p.lower().endswith('.html'):

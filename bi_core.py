@@ -1,5 +1,5 @@
 """
-bi_core.py - BACnet Inspector engine: capture-file parsing, packet decoding, display filters,
+bi_core.py - Wirescope engine: capture-file parsing, packet decoding, display filters,
 search, and the analysis behind every view (findings, devices, traffic, MS/TP, bus speed,
 available IDs / networks, compare, report).
 

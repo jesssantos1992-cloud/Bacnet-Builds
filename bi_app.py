@@ -1,5 +1,5 @@
 """
-bi_app.py - BACnet Inspector, native Windows version (Qt / PySide6).
+bi_app.py - Wirescope, native Windows version (Qt / PySide6).
 
 Run:  python bi_app.py [capture.pcapng]
 """
@@ -31,7 +31,7 @@ from bi_common import (AUTHOR, BRAND, COMPANY, COMPANY_CITY, COMPANY_SHORT, TAGL
                        label, semibold, stamp)
 from bi_store import Store
 
-APP_NAME = 'BACnet Inspector'
+APP_NAME = 'Wirescope'
 LIVE_MAX = 100_000
 
 
@@ -898,7 +898,7 @@ class MainWindow(QMainWindow):
         bt = QVBoxLayout()
         bt.setSpacing(0)
         self.brand_name = label(COMPANY_SHORT, bold=True, size=13, wrap=False)
-        self.brand_sub = label('BACnet Inspector', wrap=False)
+        self.brand_sub = label('Wirescope', wrap=False)
         self.brand_name.setToolTip(f'{COMPANY} · {TAGLINE} · {COMPANY_CITY}')
         bt.addWidget(self.brand_name)
         bt.addWidget(self.brand_sub)
@@ -1227,7 +1227,7 @@ class MainWindow(QMainWindow):
         act(m, 'Check for updates…', lambda: self.upd_check(True))
         act(m, 'Report a problem…', self.report_problem)
         m.addSeparator()
-        act(m, 'About BACnet Inspector', self.about)
+        act(m, 'About Wirescope', self.about)
 
     # ---------------------------------------------------------------- views --
     def view(self, k):
@@ -2562,7 +2562,7 @@ class MainWindow(QMainWindow):
             g = self.menuBar().actionGeometry(hm)
             return QRect(self.menuBar().mapTo(self, g.topLeft()), g.size())
         steps = [
-            (None, 'Welcome to BACnet Inspector',
+            (None, 'Welcome to Wirescope',
              'See what is happening on a BACnet network: open a capture to find problems, or use Discover to find '
              'devices and read their points live. This quick tour shows you around – it takes about a minute.', ''),
             (self.seg, 'Two ways to work',
@@ -2719,7 +2719,7 @@ class MainWindow(QMainWindow):
         d.setWindowTitle('Check for updates')
         v = QVBoxLayout(d)
         if not r.get('configured'):
-            v.addWidget(label('Updates are not set up in this copy of BACnet Inspector.'))
+            v.addWidget(label('Updates are not set up in this copy of Wirescope.'))
             v.addWidget(label(f"You have version {r.get('current') or '?'}.", muted=True))
         elif not r.get('ok'):
             v.addWidget(label(r.get('error') or 'Could not check for updates.'))
@@ -2789,9 +2789,9 @@ class MainWindow(QMainWindow):
         threading.Thread(target=work, daemon=True).start()
 
 
-MAC_STEPS = ('The new version is downloading in your browser. When it has finished: quit BACnet Inspector, open the '
-             'downloaded .zip in Downloads, and drag BACnet Inspector into Applications (choose Replace). Your captures, '
-             'names and settings are kept.')
+MAC_STEPS = ('The new version is downloading in your browser. When it has finished: quit Wirescope, open the '
+             'downloaded .zip in Downloads, and drag Wirescope into Applications (choose Replace). Your captures, '
+             'names and settings are kept. An old copy called BACnet Inspector can go in the Bin.')
 
 
 # ================================================================== start --
@@ -2807,7 +2807,7 @@ SERVER = 'BACnetInspectorNative-' + (os.environ.get('USERNAME') or 'user')
 
 
 def hand_off(path):
-    """If BACnet Inspector is already open, give it the file and return True."""
+    """If Wirescope is already open, give it the file and return True."""
     s = QLocalSocket()
     s.connectToServer(SERVER)
     if not s.waitForConnected(400):

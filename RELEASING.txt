@@ -31,7 +31,7 @@ Every release - by hand
 -----------------------
 1-2. As above.
 3. Run build_windows.bat, then build_installer.bat.
-   You get installer\BACnet-Inspector-Setup-<version>.exe and installer\update.json.
+   You get installer\Wirescope-Setup-<version>.exe and installer\update.json.
 4. On GitHub: your repository -> Releases -> "Draft a new release".
    - Tag: v<version>   (exactly, for example v1.2.2; the v matters)
    - Attach BOTH files: the Setup .exe and update.json.

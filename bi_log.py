@@ -33,7 +33,7 @@ def log_path():
 
 
 def system_info():
-    return (f'BACnet Inspector {APP_VERSION} · Windows {platform.release()} ({platform.version()}) · '
+    return (f'Wirescope {APP_VERSION} · Windows {platform.release()} ({platform.version()}) · '
             f'Python {platform.python_version()} · {"installed" if getattr(sys, "frozen", False) else "from source"}')
 
 

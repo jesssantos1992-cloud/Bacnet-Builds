@@ -29,7 +29,7 @@ $api = "https://api.github.com/repos/$owner/$repo"
 $hdr = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-Step "Releasing BACnet Inspector $ver"
+Step "Releasing Wirescope $ver"
 if ($publish) {
   if (git status --porcelain --untracked-files=no) { Fail 'There are uncommitted changes. Commit and push them first.' }
   git fetch --quiet origin
@@ -43,7 +43,7 @@ if (-not $SkipTests) { Step 'Running the regression tests'; RunBat 'run_tests.ba
 Step 'Building the application'; RunBat 'build_windows.bat' ''
 Step 'Building the installer and update.json'; RunBat 'build_installer.bat' ''
 
-$setup = "installer\BACnet-Inspector-Setup-$ver.exe"
+$setup = "installer\Wirescope-Setup-$ver.exe"
 $json = 'installer\update.json'
 foreach ($f in $setup, $json) { if (-not (Test-Path $f)) { Fail "$f was not made." } }
 
@@ -57,7 +57,7 @@ if (-not $publish) {
 }
 
 Step 'Publishing on GitHub'
-$body = @{ tag_name = "v$ver"; target_commitish = (git rev-parse HEAD); name = "BACnet Inspector $ver"
+$body = @{ tag_name = "v$ver"; target_commitish = (git rev-parse HEAD); name = "Wirescope $ver"
            body = (Get-Content release_notes.txt -Raw -Encoding UTF8).Trim(); make_latest = 'true' } | ConvertTo-Json
 $rel = Invoke-RestMethod "$api/releases" -Method Post -Headers $hdr -ContentType 'application/json; charset=utf-8' `
   -Body ([Text.Encoding]::UTF8.GetBytes($body))

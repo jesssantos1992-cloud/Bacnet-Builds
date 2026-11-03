@@ -1,24 +1,25 @@
-; Inno Setup script for BACnet Inspector  (needs Inno Setup 6.3 or newer: https://jrsoftware.org/isdl.php)
-; Build order: 1) run build_windows.bat  2) run build_installer.bat  ->  installer\BACnet-Inspector-Setup-<version>.exe
+; Inno Setup script for Wirescope (formerly BACnet Inspector)  (needs Inno Setup 6.3 or newer: https://jrsoftware.org/isdl.php)
+; Build order: 1) run build_windows.bat  2) run build_installer.bat  ->  installer\Wirescope-Setup-<version>.exe
 ; The version comes from version.txt; build_installer.bat passes it in as /DAppVersion=...
 
-#define AppName "BACnet Inspector"
+#define AppName "Wirescope"
 #ifndef AppVersion
   #error Build this with build_installer.bat (it reads the version from version.txt)
 #endif
-#define AppExe "BACnet Inspector.exe"
+#define AppExe "Wirescope.exe"
 
 [Setup]
+; Keep this AppId: it is what lets an installed copy (also one still called BACnet Inspector) upgrade in place.
 AppId={{366CA448-BB27-4033-B85B-8D844CA0A856}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=BACnet Inspector
+AppPublisher=Wirescope
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExe}
 OutputDir=installer
-OutputBaseFilename=BACnet-Inspector-Setup-{#AppVersion}
+OutputBaseFilename=Wirescope-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -37,14 +38,18 @@ SignedUninstaller=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
-Name: "assoc"; Description: "Add BACnet Inspector to the &Open with menu for .pcap and .pcapng files"; GroupDescription: "File types:"
+Name: "assoc"; Description: "Add Wirescope to the &Open with menu for .pcap and .pcapng files"; GroupDescription: "File types:"
 
 [InstallDelete]
 ; Clear the previous version's program files so parts removed in an update do not linger (settings live elsewhere).
 Type: filesandordirs; Name: "{app}\_internal"
+; The app used to be called BACnet Inspector: remove its program file and shortcuts (an upgrade keeps the folder).
+Type: files; Name: "{app}\BACnet Inspector.exe"
+Type: files; Name: "{autoprograms}\BACnet Inspector.lnk"
+Type: files; Name: "{autodesktop}\BACnet Inspector.lnk"
 
 [Files]
-Source: "dist\BACnet Inspector\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\Wirescope\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -59,6 +64,8 @@ Root: HKA; Subkey: "Software\Classes\.pcapng\OpenWithProgids"; ValueType: string
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; After an automatic update (a silent install) open the app again
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: WizardSilent
 
 [Code]
 // Live capture uses Wireshark's capture engine. Offer to download it if it is missing.

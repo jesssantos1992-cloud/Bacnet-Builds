@@ -813,7 +813,7 @@ def whats_new_dialog(parent, version, notes, on_tour=None):
     tt = QVBoxLayout()
     tt.setSpacing(0)
     tt.addWidget(label('What’s new', bold=True, size=20))
-    tt.addWidget(label(f'BACnet Inspector {version}', muted=True))
+    tt.addWidget(label(f'Wirescope {version}', muted=True))
     hd.addLayout(tt, 1)
     v.addLayout(hd)
     from PySide6.QtWidgets import QScrollArea
@@ -854,7 +854,7 @@ def whats_new_dialog(parent, version, notes, on_tour=None):
 
 def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None):
     d = QDialog(parent)
-    d.setWindowTitle('About BACnet Inspector')
+    d.setWindowTitle('About Wirescope')
     v = QVBoxLayout(d)
     v.setContentsMargins(36, 28, 36, 22)
     v.setSpacing(6)
@@ -864,8 +864,8 @@ def about_dialog(parent, version, on_updates, on_news, ico_path=None, page=None)
         ic.setPixmap(QIcon(ico_path).pixmap(QSize(80, 80)))
     v.addWidget(ic)
     v.addSpacing(6)
-    for w in (label('BACnet Inspector', bold=True, size=20), label(f'Version {version}', muted=True),
-              label('Capture analysis for BACnet/IP and MS/TP, with device discovery and live reads.', muted=True)):
+    for w in (label('Wirescope', bold=True, size=20), label(f'Version {version}', muted=True),
+              label('Capture analysis for BACnet/IP and MS/TP, with device discovery and live reads. Formerly BACnet Inspector.', muted=True)):
         w.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(w)
     v.addSpacing(10)

@@ -13,5 +13,5 @@ exit /b 1
 :go
 if not defined SIGN_TS set "SIGN_TS=http://timestamp.digicert.com"
 echo Signing %~1
-"%ST%" sign /fd SHA256 /f "%SIGN_PFX%" /p "%SIGN_PASSWORD%" /tr "%SIGN_TS%" /td SHA256 /d "BACnet Inspector" "%~1"
+"%ST%" sign /fd SHA256 /f "%SIGN_PFX%" /p "%SIGN_PASSWORD%" /tr "%SIGN_TS%" /td SHA256 /d "Wirescope" "%~1"
 exit /b %errorlevel%

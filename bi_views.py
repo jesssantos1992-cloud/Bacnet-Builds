@@ -1,5 +1,5 @@
 """
-bi_views.py - the analysis views of the native BACnet Inspector (Findings, Devices, Changes,
+bi_views.py - the analysis views of the native Wirescope (Findings, Devices, Changes,
 Traffic, Response times, Online board, Network map, Available IDs / networks, MS/TP trunk,
 Bus speed, Compare), the plain-English report, the names dialog and the help pages.
 """
@@ -210,7 +210,7 @@ class FindingsView(BaseView):
                     s += f"  Why it matters: {f['y']}\n  How to troubleshoot:\n" + '\n'.join(f'    {j + 1}. {x}' for j, x in enumerate(f['f']))
                     parts.append(s)
                 body = '\n\n'.join(parts)
-            return f'BACnet Inspector – findings for {n}\nSaved {stamp()}\n\n' + body
+            return f'Wirescope – findings for {n}\nSaved {stamp()}\n\n' + body
         return [('html', 'Web page – as shown, with highlighted addresses and all troubleshooting steps (*.html)', 'html',
                  lambda: doc('Findings – ' + n, f'<h3>{esc(n)} – findings</h3><p class="mu">Saved {stamp()}</p>' + findings_html(w, F, True))),
                 ('txt', 'Text file – plain text, easy to paste into a ticket or email (*.txt)', 'txt', txt),
@@ -1955,7 +1955,7 @@ def html_report(win, info=None, logo=None, net_map=None):
     if R['notes']:
         b += '<h2>Notes and bookmarked packets</h2>' + html_table(['Packet', 'Time (s)', 'What', 'Note'],
              [[n['no'], n['t'], H(n['info']), esc(n['note'])] for n in R['notes']])
-    b += (f'<p class="foot">Prepared by {esc(COMPANY)} ({COMPANY_SHORT}), {esc(COMPANY_CITY)}, with BACnet Inspector. Findings are '
+    b += (f'<p class="foot">Prepared by {esc(COMPANY)} ({COMPANY_SHORT}), {esc(COMPANY_CITY)}, with Wirescope. Findings are '
           'based only on what was visible in this capture; a device that stayed silent is not listed.</p></div>')
     return doc('Network report – ' + R['name'], b)
 
@@ -2528,7 +2528,7 @@ def pdf_report(win, info):
     w.setPageMargins(QMarginsF(16, 16, 16, 16), QPageLayout.Unit.Millimeter)
     w.setResolution(120)
     w.setTitle('BACnet site report')
-    w.setCreator('BACnet Inspector')
+    w.setCreator('Wirescope')
     d = QTextDocument()
     d.setDefaultFont(QFont('Segoe UI', 10))
     d.setDefaultStyleSheet(DOC_CSS)
@@ -2717,7 +2717,7 @@ HELP = {
              '<tr><td>Ctrl+B</td><td>Bookmark the selected packet</td></tr><tr><td>Ctrl+D</td><td>Discover devices on the network</td></tr>'
              '<tr><td>↑ ↓ PgUp PgDn</td><td>Move through packets</td></tr><tr><td>Alt+←</td><td>Back to the previous view / device</td></tr>'
              '<tr><td>F1</td><td>Help</td></tr></table>'),
-    'about': ('About BACnet Inspector', '<p><b>BACnet Inspector</b> {ver}<br>Reads BACnet/IP and BACnet MS/TP captures, explains what is on the '
+    'about': ('About Wirescope', '<p><b>Wirescope</b> {ver}<br>Reads BACnet/IP and BACnet MS/TP captures, explains what is on the '
               'network in plain English, and points out problems such as duplicate device IDs and duplicate network numbers.</p>'
               '<p>Designed and programmed by <b>{author}</b>.</p>'
               '<p>Everything stays on your computer.</p>')}

@@ -1,5 +1,5 @@
 @echo off
-REM Builds the native BACnet Inspector app (a folder with "BACnet Inspector.exe" inside).
+REM Builds the native Wirescope app (a folder with "Wirescope.exe" inside).
 REM Needs the bi_*.py files, bacnet_live.py and bacnet_inspector.ico in this folder.
 REM (build_windows_web.bat builds the older web-page version.)
 setlocal
@@ -18,7 +18,7 @@ echo Installing build tools...
 
 echo Building the application...
 "%PY%" -m PyInstaller --noconfirm --clean --onedir --noconsole ^
-  --name "BACnet Inspector" ^
+  --name "Wirescope" ^
   --icon "bacnet_inspector.ico" ^
   --add-data "bacnet_inspector.ico;." ^
   --add-data "accs_logo.png;." ^
@@ -37,18 +37,18 @@ echo Building the application...
   bi_app.py || (echo Build failed & pause & exit /b 1)
 
 echo Removing parts of Qt the app does not use (smaller download)...
-set "QT=dist\BACnet Inspector\_internal\PySide6"
+set "QT=dist\Wirescope\_internal\PySide6"
 for %%F in (opengl32sw.dll Qt6Quick.dll Qt6Qml.dll Qt6QmlMeta.dll Qt6QmlModels.dll Qt6QmlWorkerScript.dll Qt6Pdf.dll Qt6VirtualKeyboard.dll) do if exist "%QT%\%%F" del /q "%QT%\%%F"
 for %%F in (qdirect2d.dll qminimal.dll qoffscreen.dll) do if exist "%QT%\plugins\platforms\%%F" del /q "%QT%\plugins\platforms\%%F"
 for %%F in (qpdf.dll qgif.dll qicns.dll qjpeg.dll qtga.dll qtiff.dll qwbmp.dll qwebp.dll) do if exist "%QT%\plugins\imageformats\%%F" del /q "%QT%\plugins\imageformats\%%F"
 if exist "%QT%\plugins\platforminputcontexts" rmdir /s /q "%QT%\plugins\platforminputcontexts"
 if exist "%QT%\translations" rmdir /s /q "%QT%\translations"
 
-call "%~dp0sign.bat" "dist\BACnet Inspector\BACnet Inspector.exe" || (echo Signing failed & pause & exit /b 1)
+call "%~dp0sign.bat" "dist\Wirescope\Wirescope.exe" || (echo Signing failed & pause & exit /b 1)
 
 echo.
-echo Done:  dist\BACnet Inspector\BACnet Inspector.exe
-echo Keep the whole "BACnet Inspector" folder together, or use build_installer.bat to make a Setup file.
+echo Done:  dist\Wirescope\Wirescope.exe
+echo Keep the whole "Wirescope" folder together, or use build_installer.bat to make a Setup file.
 echo (Add --uac-admin to the PyInstaller line if you want it to always ask for Administrator,
 echo  which the built-in "raw" capture option needs. Not needed when using Wireshark/Npcap.)
 pause

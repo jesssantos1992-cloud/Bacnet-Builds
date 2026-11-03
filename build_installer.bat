@@ -2,7 +2,7 @@
 REM Compiles installer.iss into a Setup .exe and writes installer\update.json. Run build_windows.bat first.
 setlocal
 cd /d "%~dp0"
-if not exist "dist\BACnet Inspector\BACnet Inspector.exe" (echo Run build_windows.bat first - dist\BACnet Inspector\BACnet Inspector.exe was not found. & pause & exit /b 1)
+if not exist "dist\Wirescope\Wirescope.exe" (echo Run build_windows.bat first - dist\Wirescope\Wirescope.exe was not found. & pause & exit /b 1)
 set /p VER=<version.txt
 if not defined VER (echo version.txt is empty. & pause & exit /b 1)
 set "ISCC="
@@ -16,6 +16,6 @@ goto built
 :built
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0make_update_json.ps1" -Version %VER% || (echo Could not write update.json & pause & exit /b 1)
 echo.
-echo Done:  installer\BACnet-Inspector-Setup-%VER%.exe  and  installer\update.json
+echo Done:  installer\Wirescope-Setup-%VER%.exe  and  installer\update.json
 echo To publish: on GitHub make a new release with tag v%VER% and attach BOTH files. See RELEASING.txt.
 pause

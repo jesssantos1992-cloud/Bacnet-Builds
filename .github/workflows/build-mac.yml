@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: bash build_mac.sh
-      - run: gh release upload "$TAG" dist/BACnet-Inspector-Mac-*.zip --clobber
+      - run: gh release upload "$TAG" dist/Wirescope-Mac-*.zip --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}

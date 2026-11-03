@@ -1607,7 +1607,7 @@ class DiscoverView(QWidget):
         def cell(v):
             return str(v if v is not None else '').replace(';', ',').replace('\r', ' ').replace('\n', ' ')
         L = ['#Engineering-Data-Exchange - B.I.G.-EU', f'PROJECT_NAME;{cell(project)}', 'VERSION_OF_REFERENCEFILE;1',
-             f"TIMESTAMP_OF_LAST_CHANGE;{time.strftime('%d.%m.%Y')}", 'AUTHOR_OF_LAST_CHANGE;BACnet Inspector', 'VERSION_OF_LAYOUT;2.3',
+             f"TIMESTAMP_OF_LAST_CHANGE;{time.strftime('%d.%m.%Y')}", 'AUTHOR_OF_LAST_CHANGE;Wirescope', 'VERSION_OF_LAYOUT;2.3',
              '#mandatory;mandatory;mandatory;mandatory;mandatory;optional;optional;optional;optional;optional;optional;optional;'
              'optional;optional;optional;optional',
              '# keyname;device obj.-instance;object-name;object-type;object-instance;description;present-value-default;'

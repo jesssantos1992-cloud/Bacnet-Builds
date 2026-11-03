@@ -1,5 +1,5 @@
 """
-bacnet_live.py - the capture and network back end of BACnet Inspector (used by bi_app.py).
+bacnet_live.py - the capture and network back end of Wirescope (used by bi_app.py).
 
   * Capture   - live capture: Wireshark's dumpcap, an MS/TP serial adapter, or raw sockets
   * RELAY     - the read-only UDP relay used by Discover (only Who-Is, reads and one guarded write)
@@ -56,7 +56,7 @@ def _vt(s):
 
 
 def _fetch(url, limit):
-    req = urllib.request.Request(url, headers={"User-Agent": "BACnetInspector/" + APP_VERSION})
+    req = urllib.request.Request(url, headers={"User-Agent": "Wirescope/" + APP_VERSION})
     with urllib.request.urlopen(req, timeout=10) as r:
         return r.read(limit + 1)[:limit]
 
@@ -115,11 +115,11 @@ def update_install():
         if hashlib.sha256(data).hexdigest() != want:
             return {"ok": False, "error": "The download did not match its checksum, so it was not installed."}
         d = tempfile.mkdtemp(prefix="bacnet-inspector-update-")
-        path = os.path.join(d, "BACnet-Inspector-Setup-%s.exe" % re.sub(r"[^0-9A-Za-z.]", "", str(m["version"])))
+        path = os.path.join(d, "Wirescope-Setup-%s.exe" % re.sub(r"[^0-9A-Za-z.]", "", str(m["version"])))
         with open(path, "wb") as f:
             f.write(data)
         flags = 0x00000008 | 0x00000200                       # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen([path, "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS", "/NOCANCEL"],
+        subprocess.Popen([path, "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/NOCANCEL"],
                          creationflags=flags, close_fds=True)
         threading.Timer(1.5, lambda: os._exit(0)).start()     # let the installer take over
         return {"ok": True}

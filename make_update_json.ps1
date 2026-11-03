@@ -9,7 +9,7 @@ if ($feed -notmatch '^https://github\.com/([^/]+)/([^/]+)/releases/latest/downlo
   throw "update_url.txt must look like https://github.com/NAME/REPO/releases/latest/download/update.json"
 }
 $repo = "https://github.com/$($Matches[1])/$($Matches[2])"
-$setup = "installer\BACnet-Inspector-Setup-$Version.exe"
+$setup = "installer\Wirescope-Setup-$Version.exe"
 $notes = ''
 if (Test-Path release_notes.txt) { $notes = (Get-Content release_notes.txt -Raw -Encoding UTF8).Trim() }
 
@@ -17,10 +17,10 @@ $m = [ordered]@{
   version = $Version
   date    = (Get-Date -Format 'yyyy-MM-dd')
   notes   = $notes
-  url     = "$repo/releases/download/v$Version/BACnet-Inspector-Setup-$Version.exe"
+  url     = "$repo/releases/download/v$Version/Wirescope-Setup-$Version.exe"
   sha256  = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
   page    = "$repo/releases/latest"
-  mac     = "$repo/releases/download/v$Version/BACnet-Inspector-Mac-$Version.zip"   # built by GitHub after the release
+  mac     = "$repo/releases/download/v$Version/Wirescope-Mac-$Version.zip"   # built by GitHub after the release
 }
 # UTF-8 without a BOM: the app's JSON reader rejects a BOM.
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'installer\update.json'), ($m | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
