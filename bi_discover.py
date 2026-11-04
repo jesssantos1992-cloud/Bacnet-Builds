@@ -1037,12 +1037,18 @@ class DiscoverView(QWidget):
         B = [rows[i:i + 8] for i in range(0, len(rows), 8)]
 
         def one(b):
-            r = self.ex.req(e, E.ex_rpm([[x['o'], [85]] for x in b]), 4.0, 1)
+            def props(x):                              # the units too, once, when they are not known yet
+                return [85, 117] if 'uc' not in x and x['ty'] in (0, 1, 2) else [85]
+            r = self.ex.req(e, E.ex_rpm([[x['o'], props(x)] for x in b]), 4.0, 1)
             got = {x['o']: x['pr'] for x in E.ex_dec_rpm(r['d'], r['k'], r['L'])} if r.get('d') else {}
             for x in b:
-                v = (got.get(x['o']) or {}).get(85)
+                pr = got.get(x['o']) or {}
+                v, u = pr.get(85), pr.get(117)
                 if v:
                     x['val'] = E.pv_text(x['ty'], v[0])
+                if u:
+                    x['uc'] = u[0]['raw']
+                    x['u'] = E.EXU.get(u[0]['raw'], '') if u[0]['raw'] is not None else ''
 
         def work():
             self.ex.pool_map(B, 1 if E.is_mstp(e) else 3, one)
@@ -1148,7 +1154,7 @@ class DiscoverView(QWidget):
             p.add(label(f"{len(D)} device{'' if len(D) == 1 else 's'} already discovered are on the left. Pick one to see its points, "
                         'or start another discover above.', muted=True))
             r = QHBoxLayout()
-            b1 = QPushButton('Export device list (.csv)')
+            b1 = QPushButton('Export device list…')
             b1.clicked.connect(lambda: self.save_csv('bacnet-devices.csv', self.csv_devices()))
             b2 = QPushButton('Use names as labels')
             b2.setToolTip('Use these device names as labels in the Packets and Findings tabs')
@@ -1234,7 +1240,7 @@ class DiscoverView(QWidget):
         reading = bool(busy == 'browse' and e and not e.get('objs') and e.get('pm'))
         if not (e and e.get('objs')) and not reading:
             p.add(label('Press Read points to read this device’s objects and build its tree of points.', muted=True))
-        info = [('Address', E.Explorer.addr(e) if e else en['ip']), ('Vendor', en['vendor']), ('Model', en['model']),
+        info = [('Address', E.Explorer.addr(e) if e else en['ip']), ('Manufacturer', en['vendor']), ('Model', en['model']),
                 ('Location', e and e.get('loc')), ('Description', e and e.get('desc')), ('Status', e and e.get('st'))]
         tech = [('Firmware', e and e.get('fw')), ('Software', e and e.get('sw')), ('Max APDU', e and e.get('mx')),
                 ('Device object', f"device {en['id']}"), ('Vendor ID', (en['cap'] or {}).get('v'))]
@@ -1360,7 +1366,7 @@ class DiscoverView(QWidget):
             fl_.setStyleSheet(f"color:{colors()['se']}")
             sv.addWidget(fl_)
         f = QFormLayout()
-        for k, v in (('Display Name:', nm), ('Description:', o['desc'] or '')):
+        for k, v in (('Display name:', nm), ('Description:', o['desc'] or '')):
             le = QLineEdit(v)
             le.setReadOnly(True)
             f.addRow(k, le)
@@ -1387,9 +1393,9 @@ class DiscoverView(QWidget):
             le.setReadOnly(True)
             return le
         f1 = QFormLayout()
-        f1.addRow('Display Name:', ro(nm))
+        f1.addRow('Display name:', ro(nm))
         f1.addRow('Description:', ro(o['desc'] or ''))
-        f1.addRow('Present Value =', ro(val))
+        f1.addRow('Present value:', ro(val))
         dv.addLayout(f1)
         dv.addLayout(self._point_buttons(en, e, o, wr, details=True))
 
@@ -1408,16 +1414,16 @@ class DiscoverView(QWidget):
         tv_.setSpacing(8)
         section('Calibration', tv_)
         f2 = QFormLayout()
-        f2.addRow('COV Increment:', ro(g.get('cov', '')))
+        f2.addRow('COV increment:', ro(g.get('cov', '')))
         f2.addRow('Resolution:', ro(g.get('res') or '?'))
-        f2.addRow('Scaling Range – Minimum:', ro(g.get('min', '')))
-        f2.addRow('Scaling Range – Maximum:', ro(g.get('max', '')))
+        f2.addRow('Scaling range – minimum:', ro(g.get('min', '')))
+        f2.addRow('Scaling range – maximum:', ro(g.get('max', '')))
         tv_.addLayout(f2)
-        section('BACnet Configuration', tv_)
+        section('BACnet configuration', tv_)
         f3 = QFormLayout()
-        f3.addRow('Object Name:', ro(nm))
-        f3.addRow('Object Id:', ro(f"{tn} {o['inst']}"))
-        f3.addRow('Object Type:', ro(tn))
+        f3.addRow('Object name:', ro(nm))
+        f3.addRow('Object ID:', ro(f"{tn} {o['inst']}"))
+        f3.addRow('Object type:', ro(tn))
         addr = f"bacnet://{en['id']}/{ab}:{o['inst']}"
         ar = QHBoxLayout()
         ar.addWidget(ro(addr), 1)
@@ -1428,9 +1434,9 @@ class DiscoverView(QWidget):
         oos = QCheckBox()
         oos.setEnabled(False)
         oos.setChecked(bool(g.get('oos')))
-        f3.addRow('Out of Service:', oos)
+        f3.addRow('Out of service:', oos)
         f3.addRow('Reliability:', ro(g.get('rel') or '?'))
-        f3.addRow('Profile Name:', ro(g.get('prof') or '?'))
+        f3.addRow('Profile name:', ro(g.get('prof') or '?'))
         tv_.addLayout(f3)
         section('Alarm & status')
         f5 = QFormLayout()
@@ -1438,9 +1444,9 @@ class DiscoverView(QWidget):
         fl = ro(flags or '?')
         if flags and flags != 'normal':
             fl.setStyleSheet(f"color:{colors()['se']};font-weight:600")
-        f5.addRow('Status Flags:', fl)
-        f5.addRow('Event State:', ro(g.get('es') or '?'))
-        for k, t in (('hi', 'High Limit:'), ('lo', 'Low Limit:'), ('db', 'Deadband:'), ('nc', 'Notification Class:')):
+        f5.addRow('Status flags:', fl)
+        f5.addRow('Event state:', ro(g.get('es') or '?'))
+        for k, t in (('hi', 'High limit:'), ('lo', 'Low limit:'), ('db', 'Deadband:'), ('nc', 'Notification class:')):
             if g.get(k):
                 f5.addRow(t, ro(g[k]))
         dv.addLayout(f5)
@@ -1465,10 +1471,10 @@ class DiscoverView(QWidget):
             pa = g.get('pa')
             cp = next((i + 1 for i, v in enumerate(pa) if v['a']), 0) if pa else 0
             f4 = QFormLayout()
-            f4.addRow('Relinquish Default:', ro(g.get('rd', '')))
-            f4.addRow('Current Command Priority:', ro((cp if cp else 'none (at default)') if pa else '?'))
+            f4.addRow('Relinquish default:', ro(g.get('rd', '')))
+            f4.addRow('Current command priority:', ro((cp if cp else 'none (at default)') if pa else '?'))
             dv.addLayout(f4)
-            section('Priority Array')
+            section('Priority array')
             if pa:
                 grid = QGridLayout()
                 for c in range(4):
@@ -1544,7 +1550,7 @@ class DiscoverView(QWidget):
         if not L:
             return
         p.add(heading('Write log' + (' – this device' if dev_id is not None else ''), 13))
-        b = QPushButton('Export write log (.csv)')
+        b = QPushButton('Export write log…')
         b.clicked.connect(lambda: self.save_csv('bacnet-write-log.csv', self.csv_wlog()))
         r = QHBoxLayout()
         r.addWidget(b)
@@ -1719,7 +1725,7 @@ class DiscoverView(QWidget):
         m.addAction('Copy device ID', lambda: QApplication.clipboard().setText(str(en['id'])))
         ip = en['ip'] or (ex and ex.get('ip')) or ''
         m.addAction('Copy IP address', lambda: QApplication.clipboard().setText(ip)).setEnabled(bool(ip))
-        m.addAction('Export points (.csv)', lambda: self.save_csv(f"device-{en['id']}-points.csv", self.csv_points(ex))).setEnabled(bool(ex and ex.get('objs')))
+        m.addAction('Export points…', lambda: self.save_csv(f"device-{en['id']}-points.csv", self.csv_points(ex))).setEnabled(bool(ex and ex.get('objs')))
         m.addAction('Export points as EDE…', lambda: self.save_ede(f"device-{en['id']}-EDE.csv", [ex])).setEnabled(bool(ex and ex.get('objs')))
         m.addSeparator()
 
@@ -1777,7 +1783,7 @@ class DiscoverView(QWidget):
         rows = [[d['id'], d.get('name') or '', d['ip'] + (' / ' + d['sa'] if d.get('sa') else ''), '' if d.get('sn') is None else d['sn'],
                  d.get('vendor') or C.VN.get(d.get('vn'), ''), d.get('vn'), d.get('model') or '', d.get('fw') or '', d.get('sw') or '',
                  d.get('desc') or '', d.get('loc') or '', d.get('mx')] for d in sorted(self.ex.devs.values(), key=lambda d: d['id'])]
-        return csv_text('Device ID,Name,Address,Network,Vendor,Vendor ID,Model,Firmware,Software version,Description,Location,Max APDU', rows)
+        return csv_text('Device ID,Name,Address,Network,Manufacturer,Vendor ID,Model,Firmware,Software version,Description,Location,Max APDU', rows)
 
     # object type -> inventory column (anything else is counted under Other)
     INV_TYPES = [(0, 'AI'), (1, 'AO'), (2, 'AV'), (3, 'BI'), (4, 'BO'), (5, 'BV'), (13, 'MSI'), (14, 'MSO'), (19, 'MSV'),
@@ -1810,7 +1816,7 @@ class DiscoverView(QWidget):
             rows.append([d['id'], d.get('name') or '',d.get('vendor') or C.VN.get(d.get('vn'), ''),
                          d.get('vn'), d.get('model') or '', d.get('fw') or '', d.get('sw') or '', where, net, station,
                          d.get('loc') or '', d.get('desc') or '', d.get('mx'), seg.get(d.get('sg'), ''), *counts, note])
-        head = ['Device ID', 'Name', 'Vendor', 'Vendor ID', 'Model', 'Firmware', 'Software version', 'Address', 'Network',
+        head = ['Device ID', 'Name', 'Manufacturer', 'Vendor ID', 'Model', 'Firmware', 'Software version', 'Address', 'Network',
                 'Station / MAC', 'Location', 'Description', 'Max APDU', 'Segmentation', 'Objects'] + \
                [n for _, n in self.INV_TYPES] + ['Other', 'Note']
         return csv_text(','.join(head), rows)
@@ -1904,7 +1910,7 @@ class DiscoverView(QWidget):
             rows = [[d['id'], esc(d.get('name') or ''), esc(E.Explorer.addr(d)), esc(d.get('vendor') or C.VN.get(d.get('vn'), '')),
                      esc(d.get('model') or ''), esc(d.get('st') or '')] for d in sorted(self.ex.devs.values(), key=lambda d: d['id'])]
             return doc('Discovered devices', f'<h3>Discovered devices</h3><p class="mu">Saved {stamp()}</p>' +
-                       html_table(['Device ID', 'Name', 'Address', 'Vendor', 'Model', 'Status'], rows))
+                       html_table(['Device ID', 'Name', 'Address', 'Manufacturer', 'Model', 'Status'], rows))
         return [('html', 'Web page – the discovered devices (*.html)', 'html', html),
                 ('csv', 'Spreadsheet – one row per device (*.csv)', 'csv', lambda: '﻿' + self.csv_devices()),
                 ('inventory', 'Site inventory – devices with point counts (*.csv)', 'csv', lambda: '﻿' + self.csv_inventory()),

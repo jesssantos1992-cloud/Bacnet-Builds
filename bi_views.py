@@ -347,7 +347,7 @@ class DevicesView(BaseView):
         pills = [(C.pl(ng, 'gateway'), 'NOTE'), (C.pl(nn, 'network'), 'NOTE'), (C.pl(len(D), 'device'), 'NOTE')]
         if dup:
             pills.append((C.pl(dup, 'duplicate ID'), 'SERIOUS'))
-        self.top.addWidget(summary_row('Network layout', pills))
+        self.top.addWidget(summary_row('Devices', pills))
         self.tree.clear()
         bold = semibold(QFont(self.tree.font()))
         mu = QColor(colors()['mu'])
@@ -548,7 +548,7 @@ class ChangesView(BaseView):
         vc = len(win.FD.vc or [])
         if vc:
             pills.append((C.pl(vc, 'value change'), 'NOTE'))
-        self.top.addWidget(summary_row('Writes and commands' if L else 'No writes or commands in this capture', pills))
+        self.top.addWidget(summary_row('Changes', pills or [('none in this capture', 'NOTE')]))
         km = C.kid_map(win.FD)
         c = colors()
         R = self.rows()
@@ -689,8 +689,9 @@ class ResponseView(PageView):
         weak = sum(1 for h in win.FD.hl or [] if h['rate'] != 'Good')
         if weak:
             pills.append((f"{C.pl(weak, 'device')} rated Fair or Poor", 'WARNING'))
-        p.add(summary_row('No request / answer pairs found' if not L else 'Some devices are slow or silent' if bad else
-                          'Answers are prompt, but some devices need a look' if weak else 'Everything answered promptly', pills))
+        verdict = ('no request / answer pairs in this capture' if not L else 'some devices are slow or silent' if bad else
+                   'some devices need a look' if weak else 'everything answered promptly')
+        p.add(summary_row('Response times & errors', [(verdict, 'WARNING' if bad or weak else 'NOTE')] + pills))
         p.add(hint('Each request is matched to its answer (same two devices, same request number) and the wait is measured. '
                    'Controllers usually answer in well under half a second; a typical time over 1 second, or many unanswered '
                    'requests, points to an overloaded device or a poor connection. Double-click a row to see its packets.'))
@@ -766,7 +767,7 @@ class OnlineView(PageView):
             pills.append((f"{c['sil']} silent", 'SERIOUS'))
         if c['quiet']:
             pills.append((f"{c['quiet']} announced but never heard again", 'WARNING'))
-        p.add(summary_row('Nothing heard yet' if not R else f"{C.pl(c['sil'], 'device')} gone silent" if c['sil'] else 'Everyone is talking', pills))
+        p.add(summary_row('Online board', pills or [('nothing heard yet' if not R else 'everyone is talking', 'NOTE')]))
         p.add(hint('A device counts as online while it keeps sending within about 6 times its usual rhythm (at least 60 '
                    'seconds). A device that was active and then stopped is silent. ' +
                    ('This updates live.' if live else 'For a saved capture, “silent” means it stopped talking before the end of the capture.')))
@@ -1203,7 +1204,7 @@ class AvailIdsView(PageView):
     def build(self, p):
         win = self.win
         st = win.store.get('bi_av2') or {}
-        p.add(label('Available device IDs', bold=True, size=16))
+        p.add(summary_row('Available IDs', []))
         p.add(label('Every device on a BACnet system needs its own unique number, its Device ID. This page shows which IDs are '
                     'already taken and which are still available, so you can pick a safe one for a new device.', muted=True))
         s = Settings('Settings', getattr(self, '_set_open', False))
@@ -1410,7 +1411,7 @@ class AvailNetsView(PageView):
     def build(self, p):
         win = self.win
         sn = win.store.get('bi_nv') or {}
-        p.add(label('Available network numbers', bold=True, size=16))
+        p.add(summary_row('Available networks', []))
         p.add(label('Each separate BACnet network (a trunk of devices behind a router) needs its own unique network number. This page '
                     'shows which numbers are already taken and which are still available, so a new network does not clash with an existing one.', muted=True))
         s = Settings('Settings', getattr(self, '_set_open', False))
@@ -1988,7 +1989,7 @@ def txt_report(win):
     if R['slow']:
         L += ['', 'SLOW OR SILENT DEVICES'] + [f"  {e['key']}: typical {C.fmt_ms(e['med'])}, worst {C.fmt_ms(e['max'])}, {e['miss']} unanswered" for e in R['slow']]
     if R['notes']:
-        L += ['', 'NOTES'] + [f"  Packet {n['no']} ({n['t']}s) {n['info']}{' - ' + n['note'] if n['note'] else ''}" for n in R['notes']]
+        L += ['', 'NOTES'] + [f"  Packet {n['no']} ({n['t']} s) {n['info']}{' - ' + n['note'] if n['note'] else ''}" for n in R['notes']]
     return '\n'.join(L)
 
 
@@ -2258,9 +2259,9 @@ class PointsView(BaseView):
             if w:
                 w.setParent(None)
                 w.deleteLater()
-        self.top.addWidget(summary_row('Point values over time' if L else 'No point values in this capture',
+        self.top.addWidget(summary_row('Point history',
                                        [(C.pl(len({(e['key'], e['obj']) for e in L}), 'point'), 'NOTE'),
-                                        (C.pl(len(win.FD.vc or []), 'value change'), 'NOTE')] if L else []))
+                                        (C.pl(len(win.FD.vc or []), 'value change'), 'NOTE')] if L else [('none in this capture', 'NOTE')]))
         sel = self.current()
         keep = (sel['key'], sel['obj'], sel['prop']) if sel else None
         self.R = R = self.rows()[:3000]
@@ -2359,7 +2360,7 @@ class AlarmsView(BaseView):
         pills = [(C.pl(len(L), 'notification'), 'NOTE')] if L else []
         if wait:
             pills.append((f'{wait} not acknowledged', 'WARNING'))
-        self.top.addWidget(summary_row('Alarms and events' if L else 'No alarms or events in this capture', pills))
+        self.top.addWidget(summary_row('Alarms & events', pills or [('none in this capture', 'NOTE')]))
         km = C.kid_map(win.FD)
         c = colors()
         rows, data = [], []

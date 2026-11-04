@@ -681,7 +681,7 @@ class LivePanel(QWidget):
         row.addWidget(self.go)
         self.cl = QPushButton('Clear')
         self.cl.setToolTip('Throw away the packets captured so far')
-        self.sv = QPushButton('Save capture')
+        self.sv = QPushButton('Save capture…')
         self.sv.setToolTip('Save everything captured so far as a .pcapng file')
         row.addWidget(self.cl)
         row.addWidget(self.sv)
@@ -815,8 +815,8 @@ VNAME = {'p': 'packets', 'f': 'findings', 'd': 'devices', 'a': 'available-ids', 
          's': 'response-times', 'c': 'compare', 'b': 'bus-speed', 'o': 'online', 'w': 'changes', 't': 'traffic',
          'm': 'mstp-trunk', 'g': 'network-map', 'x': 'explorer', 'r': 'report', 'h': 'point-history', 'e': 'alarms',
          'site': 'site-report'}
-VTITLE = {'p': 'Packets', 'f': 'Findings', 'd': 'Devices', 'a': 'Available IDs', 'n': 'Available Networks',
-          's': 'Response times & errors', 'c': 'Compare', 'b': 'Bus speed', 'o': 'Online board', 'w': 'Changes',
+VTITLE = {'p': 'Packets', 'f': 'Findings', 'd': 'Devices', 'a': 'Available IDs', 'n': 'Available networks',
+          's': 'Response times & errors', 'c': 'Compare captures', 'b': 'Bus speed', 'o': 'Online board', 'w': 'Changes',
           't': 'Traffic', 'm': 'MS/TP trunk', 'g': 'Network map', 'x': 'Discover', 'h': 'Point history',
           'e': 'Alarms & events'}
 
@@ -1159,8 +1159,8 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _=False, k=k: self.goto(k))
             m.addAction(a)
         m.addSeparator()
-        for t, k in [('Available IDs', 'a'), ('Available Networks', 'n'), ('Response times & errors', 's'),
-                     ('Compare captures', 'c'), ('Bus speed', 'b')]:
+        for t, k in [('Point history', 'h'), ('Alarms & events', 'e'), ('Response times & errors', 's'),
+                     ('Available IDs', 'a'), ('Available networks', 'n'), ('Bus speed', 'b'), ('Compare captures', 'c')]:
             act(m, t, lambda _=False, k=k: self.goto(k))
         m.addSeparator()
         for t, v in [('Theme: automatic', ''), ('Theme: light', 'light'), ('Theme: dark', 'dark')]:
@@ -1194,13 +1194,13 @@ class MainWindow(QMainWindow):
         act(m, 'Check device clocks…', lambda: self.site_audit(True), None,
             lambda: not self.explorer.busy)
         m.addSeparator()
-        act(m, 'Send Who-Is (all devices)', lambda: self.send_msg('whois'))
-        act(m, 'Send Who-Is-Router (all networks)', lambda: self.send_msg('whoisrouter'))
-        act(m, 'Send What-Is-Network-Number', lambda: self.send_msg('netnum'))
+        act(m, 'Find all devices (Who-Is)', lambda: self.send_msg('whois'))
+        act(m, 'Find routers (Who-Is-Router)', lambda: self.send_msg('whoisrouter'))
+        act(m, 'Ask network number (What-Is-Network-Number)', lambda: self.send_msg('netnum'))
         m.addSeparator()
         self.m_run = act(m, 'Start capture', lambda: (self.switch_tab(self.LT), self.start_stop()), None, lambda: self.LT)
         act(m, 'Clear live capture', self.clear_live, None, lambda: self.LT)
-        act(m, 'Save raw live capture (.pcapng)', self.save_live_raw, None, lambda: self.LT)
+        act(m, 'Save live capture…', self.save_live_raw, None, lambda: self.LT)
 
         def cap_menu(m=m):
             self.m_arm.setText('Turn off write access' if self.explorer.armed() else 'Enable write access…')
@@ -1215,7 +1215,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         act(m, 'Quick start', lambda: self.manual('quick'))
         act(m, 'Display filter reference', lambda: self.manual('filter'))
-        act(m, 'Discover and reading points', lambda: self.manual('discover'))
+        act(m, 'Reading points (Discover)', lambda: self.manual('discover'))
         act(m, 'Keyboard shortcuts', lambda: self.manual('keys'))
         act(m, 'Troubleshooting', lambda: self.manual('trouble'))
         m.addSeparator()

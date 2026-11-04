@@ -1527,7 +1527,8 @@ def fmt_ms(ms) -> str:
 
 
 def pl(n, w) -> str:
-    return f"{n} {w}{'' if n == 1 else 's'}"
+    """'1 device', '3,772 value changes': a count with its word, thousands grouped like everywhere else."""
+    return f"{locale_int(n) if isinstance(n, int) else n} {w}{'' if n == 1 else 's'}"
 
 
 def length(s) -> str:
@@ -1707,7 +1708,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         return f"{k} via gateway {', '.join(gws[k])}" if k in gws else k
 
     def tm(t):
-        return tofixed(t - T0, 1) + 's'
+        return tofixed(t - T0, 1) + ' s'
     for r in P:
         if r.t > tEnd:
             tEnd = r.t
@@ -2126,7 +2127,7 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         return 'device ' + ', '.join(map(str, i)) + ' (' + k + ')' if i else k
 
     def fT(t):
-        return tofixed(t - T0, 1) + 's'
+        return tofixed(t - T0, 1) + ' s'
     nf = 0
     for g in wgrp.values():
         if nf >= 5 or len(g['w']) < 2 or len(g['seq']) < 4:

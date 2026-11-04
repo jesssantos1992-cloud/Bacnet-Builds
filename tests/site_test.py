@@ -192,6 +192,12 @@ pump(0.8)
 from PySide6.QtWidgets import QLabel  # noqa: E402
 texts = [x.text() for x in dv.insp.findChildren(QLabel)]
 check('States: 1 Off · 2 Low · 3 High' in texts and '3 – High' in texts, 'the point panel shows the state and the list')
+dv.go_node({'k': dev['key'], 'o': E.oid(0, 1)})
+pump(1.5)
+w.grab().save(os.path.join(OUT, 'discover-point.png'))
+dv.go_node({'k': dev['key']})
+pump(1.0)
+w.grab().save(os.path.join(OUT, 'discover-device.png'))
 dv.go_node({'k': dev['key'], 't': 13})
 until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 4).text() != 'reading the states…' and dv.live_tbl[0].item(0, 2).text(), 30)
 check(dv.live_tbl[0].item(0, 4).text() == 'no state names' and dv.live_tbl[0].item(0, 2).text() == '1',

@@ -10,3 +10,5 @@
 - Values on a Discover page are read as soon as it opens.
 - Live watch shows units, and no low / high for on/off points.
 - Trend logs mark where the clocks changed for daylight saving; EDE files include the unit code.
+- Consistency: every page is titled with its name in the sidebar, the same actions have the same names in menus and on pages, buttons that open a window end in "…", counts use thousands separators, and times read "12.3 s" everywhere.
+- The View menu lists Point history and Alarms & events; the point panel uses plain sentence-case labels; Discover says Manufacturer like the rest of the app.
