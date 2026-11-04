@@ -13,7 +13,7 @@ import time
 
 from PySide6.QtCore import (QAbstractTableModel, QByteArray, QEvent, QModelIndex, QObject, QRect, QSize, Qt, QThread,
                             QTimer, Signal)
-from PySide6.QtGui import (QAction, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap,
+from PySide6.QtGui import (QAction, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter, QPixmap,
                            QShortcut)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
@@ -27,7 +27,7 @@ import bacnet_live as BL
 import bi_core as C
 import bi_points
 import bi_ui as U
-from bi_common import (AUTHOR, BRAND, COMPANY, COMPANY_CITY, COMPANY_SHORT, TAGLINE, logo_path, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
+from bi_common import (AUTHOR, BRAND, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
                        label, semibold, stamp)
 from bi_store import Store
 
@@ -889,20 +889,14 @@ class MainWindow(QMainWindow):
         sv = QVBoxLayout(self.sidew)
         sv.setContentsMargins(0, 14, 0, 8)
         sv.setSpacing(6)
-        bh = QHBoxLayout()                       # the company: logo, ACCS and the app's name
+        bh = QHBoxLayout()                       # the app's icon and name (ACCS is in Help > About)
         bh.setContentsMargins(20, 0, 12, 8)
         bh.setSpacing(10)
         self.logo = QLabel()
-        self.logo.setPixmap(QIcon(logo_path()).pixmap(QSize(30, 30)))
+        self.logo.setPixmap(QIcon(res_path('bacnet_inspector.ico')).pixmap(QSize(30, 30)))
         bh.addWidget(self.logo)
-        bt = QVBoxLayout()
-        bt.setSpacing(0)
-        self.brand_name = label(COMPANY_SHORT, bold=True, size=13, wrap=False)
-        self.brand_sub = label('Wirescope', wrap=False)
-        self.brand_name.setToolTip(f'{COMPANY} · {TAGLINE} · {COMPANY_CITY}')
-        bt.addWidget(self.brand_name)
-        bt.addWidget(self.brand_sub)
-        bh.addLayout(bt, 1)
+        self.brand_name = label(APP_NAME, bold=True, size=13, wrap=False)
+        bh.addWidget(self.brand_name, 1)
         sv.addLayout(bh)
         self.side_title = label('Capture', bold=True, size=17, wrap=False)
         self.side_title.setContentsMargins(22, 0, 0, 2)
@@ -1086,7 +1080,6 @@ class MainWindow(QMainWindow):
             f"QListWidget::item:hover:!selected:enabled{{background:{c['shov']}}}"
             f"QListWidget::item:selected{{background:{c['ssel']};color:{c['sfg']}}}"
             f"QListWidget::item:disabled{{color:{c['smu']};background:transparent;padding-left:8px}}")
-        self.brand_sub.setStyleSheet(f"color:{c['smu']}")
         for k, it in self.side_items.items():
             it.setIcon(side_icon(k))
         self.find_b.setIcon(U.icon('search', c['mu'], 16))
@@ -1396,7 +1389,7 @@ class MainWindow(QMainWindow):
                                    U.icon('wave' if t.live else 'file', colors()['mu'], 14))
             self.tabbar.setTabData(i, t.id)
             self.tabbar.setTabToolTip(i, t.path or t.n)
-            self.tabbar.setTabTextColor(i, QColor(colors()['se']) if ns else self.tabbar.palette().color(QPalette.ColorRole.WindowText))
+            self.tabbar.setTabTextColor(i, QColor(colors()['se']) if ns else QColor(colors()['fg']))      # the theme's own colour: the palette lags behind a switch
             if t.live:
                 self.tabbar.setTabButton(i, QTabBar.ButtonPosition.RightSide, None)
             if t is self.ac:
