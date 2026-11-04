@@ -682,7 +682,7 @@ class DiscoverView(QWidget):
                             for o in sorted(os2, key=lambda o: C.natural_key(o['name']))[:800]:
                                 pi = QTreeWidgetItem(ci, [o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"])
                                 pi.setData(0, K_ROLE, ('p', e['key'], o['o']))
-                                pi.setToolTip(0, f"{o['val']} {o['u']}".strip())
+                                pi.setToolTip(0, E.value_text(o))
                                 if sel and sel.get('k') == e['key'] and sel.get('o') == o['o']:
                                     cur = pi
                             ci.setExpanded(ck in self.open or bool(q))
@@ -1056,13 +1056,13 @@ class DiscoverView(QWidget):
                 t, os_, e = tbl
                 for i, o in enumerate(os_):
                     it = t.item(i, 2)
-                    txt = f"{o['val']} {o['u']}".strip()
+                    txt = E.value_text(o)
                     if it is not None and it.text() != txt:
                         it.setText(txt)
                 self.live_lab.setText(self.live_text(e))
             if big:
                 b, o, _e = big
-                b.setText(f"{o['val']} {o['u']}".strip() or '—')
+                b.setText(E.value_text(o) or '—')
         except RuntimeError:                          # the page was rebuilt while reading
             pass
 
@@ -1290,9 +1290,21 @@ class DiscoverView(QWidget):
         ww = QWidget()
         ww.setLayout(r)
         p.add(ww)
-        t = Table(['#', 'Name', 'Value', 'Description', ''])
-        t.fill([[o['inst'], o['name'], (f"{o['val']} {o['u']}".strip(), {'bold': True}), (o['desc'], {'fg': colors()['mu']}),
-                 'commandable – double-click to open' if o['ty'] in E.CMD_T else ''] for o in os_],
+        ms = ty in E.MS_T
+        t = Table(['#', 'Name', 'Value', 'Description', 'States' if ms else ''])
+        if ms and any('states' not in o for o in os_) and not e.get('stl'):
+            e['stl'] = 1                                       # read what each state means, once per device
+
+            def load(rows=[o for o in os_ if 'states' not in o]):
+                try:
+                    self.ex.read_states(e, rows)
+                finally:
+                    e['stl'] = 0
+            self.ex.run(load)
+        t.fill([[o['inst'], o['name'], (E.value_text(o), {'bold': True}), (o['desc'], {'fg': colors()['mu']}),
+                 ((E.states_text(o) if o.get('states') else 'reading the states…' if 'states' not in o else 'no state names',
+                   {'fg': colors()['mu']}) if ms else 'commandable – double-click to open' if o['ty'] in E.CMD_T else '')]
+                for o in os_],
                [{'k': e['key'], 'o': o['o']} for o in os_])
         t.rowActivated.connect(lambda n: n and self.go_node(n))
         t.cellClicked.connect(lambda r, _c, t=t: QTimer.singleShot(0, lambda n=t._data[r]: n and n != self.node and self.go_node(n)))
@@ -1314,7 +1326,10 @@ class DiscoverView(QWidget):
         nm = o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"
         tn = E.cat_name(o['ty']).rstrip('s')
         ab = E.ABBR.get(o['ty']) or f"OBJ{o['ty']}"
-        val = f"{o['val']} {o['u']}".strip()
+        val = E.value_text(o)
+        if o['ty'] in E.MS_T and 'states' not in o and not o.get('stl'):
+            o['stl'] = 1
+            self.ex.run(self.ex.read_states, e, [o])
         pd = o.get('pd')
         tabs = QTabWidget()
         tabs.setDocumentMode(False)
@@ -1333,6 +1348,10 @@ class DiscoverView(QWidget):
         big.setToolTip('Present value, read from the device every few seconds')
         sv.addWidget(big)
         self.live_big = (big, o, e)
+        if o['ty'] in E.MS_T and o.get('states'):
+            sl = label('States: ' + E.states_text(o, 64), muted=True)
+            sl.setToolTip('What each value of this multi-state point means (its state text)')
+            sv.addWidget(sl)
         flags = (pd or {}).get('flags')
         if flags and flags != 'normal':
             fl_ = label(f'⚠ {flags}', bold=True)

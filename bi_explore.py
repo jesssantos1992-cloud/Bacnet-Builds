@@ -302,6 +302,32 @@ def ip_of(k):
     return m.group(1) if m else ''
 
 
+MS_T = (13, 14, 19)                     # multi-state input, output and value
+
+
+def state_name(row, val=None):
+    """What a multi-state value means, from the object's state-text ('' when unknown)."""
+    st = row.get('states') or []
+    try:
+        n = int(float(str(row.get('val') if val is None else val).split()[0]))
+    except (ValueError, IndexError):
+        return ''
+    return st[n - 1] if 1 <= n <= len(st) else ''
+
+
+def value_text(row):
+    """The value as shown on screen: '72.5 °F', 'active', or '2 – Low' for a multi-state point."""
+    s = f"{row.get('val', '')} {row.get('u', '')}".strip()
+    nm = state_name(row) if row.get('ty') in MS_T else ''
+    return f'{s} – {nm}' if s and nm else s
+
+
+def states_text(row, limit=8):
+    st = row.get('states') or []
+    t = ' · '.join(f'{i + 1} {s}' for i, s in enumerate(st[:limit]))
+    return t + (f' · … ({len(st)} states)' if len(st) > limit else '')
+
+
 def pv_text(row_ty, v):
     """Present-value text: binary objects show active / inactive."""
     s = v['s']
@@ -563,6 +589,28 @@ class Explorer:
 
     def rpc(self, dev, o, p, idx=None):
         return self.req(dev, ex_rp(o, p, idx))
+
+    def read_states(self, dev, rows):
+        """The state-text of multi-state objects: row['states'] = ['Off', 'Low', ...] (state 1 first), or [] when the
+        device has none. Read whole, or one state at a time when the list is too long for one answer."""
+        for row in rows:
+            r = self.rpc(dev, row['o'], 110)
+            x = ex_dec_rp(r['d'], r['k'], r['L']) if r.get('d') else None
+            if x is not None:
+                row['states'] = [unq(v['s']) for v in x['it'] if v['n'] == 7]
+            elif r.get('seg') or r.get('abort') or r.get('rej'):
+                c = self.rpc(dev, row['o'], 110, 0)
+                y = ex_dec_rp(c['d'], c['k'], c['L']) if c.get('d') else None
+                n = y['it'][0]['raw'] if y and y['it'] else 0
+                out = []
+                for i in range(1, min(n or 0, 64) + 1):
+                    q = self.rpc(dev, row['o'], 110, i)
+                    z = ex_dec_rp(q['d'], q['k'], q['L']) if q.get('d') else None
+                    out.append(unq(z['it'][0]['s']) if z and z['it'] else '')
+                row['states'] = out
+            else:
+                row['states'] = []                      # none, or no answer: do not ask again
+            self.notify()
 
     def run(self, fn, *a):
         """Run fn on a worker thread."""

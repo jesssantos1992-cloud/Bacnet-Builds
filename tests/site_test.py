@@ -177,6 +177,26 @@ check(len(wv.pts[0]['s']) <= n + 1, 'Pause stops reading')
 shot(wv, 'watch')
 wv.close()
 
+# multi-state points: what each state means
+dv.LIVE_S = {'ip': 1, 'mstp': 2}
+dv.go_node({'k': dev['key'], 't': 19})
+until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 4).text() == '1 Off · 2 Low · 3 High' and dv.live_tbl[0].item(0, 2).text(), 30)
+t = dv.live_tbl[0]
+check(t.horizontalHeaderItem(4).text() == 'States' and t.item(0, 4).text() == '1 Off · 2 Low · 3 High',
+      f'the States column lists what each state means ({t.item(0, 4).text()!r})')
+check(t.item(0, 2).text() == '2 – Low', f'the value says which state it is ({t.item(0, 2).text()!r})')
+S.SIMS[0].objs[(19, 1)][85] = S.unsigned(3)
+check(until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 2).text() == '3 – High', 30), 'the live value keeps the state name')
+dv.go_node({'k': dev['key'], 'o': E.oid(19, 1)})
+pump(0.8)
+from PySide6.QtWidgets import QLabel  # noqa: E402
+texts = [x.text() for x in dv.insp.findChildren(QLabel)]
+check('States: 1 Off · 2 Low · 3 High' in texts and '3 – High' in texts, 'the point panel shows the state and the list')
+dv.go_node({'k': dev['key'], 't': 13})
+until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 4).text() != 'reading the states…' and dv.live_tbl[0].item(0, 2).text(), 30)
+check(dv.live_tbl[0].item(0, 4).text() == 'no state names' and dv.live_tbl[0].item(0, 2).text() == '1',
+      'a multi-state point without state text says so')
+
 # the buttons on Discover's pages
 dv.go_node({'k': dev['key'], 'o': tl['o']})
 pump(1.0)

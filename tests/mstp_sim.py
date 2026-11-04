@@ -261,6 +261,9 @@ class SimController(threading.Thread):
             if idx == 0:
                 return unsigned(7)
             return week[idx - 1] if idx else b''.join(week)
+        if p == 110 and 'st' in ob:                  # state text: the whole list, its length or one state
+            st = ob['st']
+            return unsigned(len(st)) if idx == 0 else cstr(st[idx - 1]) if idx else b''.join(cstr(x) for x in st)
         if t == 20 and p == 141:
             return unsigned(len(self.trend))
         if p == 75:
@@ -293,6 +296,8 @@ def make_trunk(controllers, site=False):
             objs[(0, 2)] = {77: cstr('RAT'), 85: real(21.0), 117: enum(62), 28: cstr(''), 81: b'\x11'}
             objs[(0, 3)] = {77: cstr('OAT'), 85: real(0.0), 117: enum(62), 28: cstr(''), 103: enum(1)}
             objs[(4, 2)][87] = b'\x00' * 7 + enum(1) + b'\x00' * 8
+            objs[(19, 1)] = {77: cstr('Fan speed'), 85: unsigned(2), 28: cstr(''), 'st': ['Off', 'Low', 'High']}
+            objs[(13, 1)] = {77: cstr('Mode'), 85: unsigned(1), 28: cstr('')}
             objs[(17, 1)] = {77: cstr('Occupancy'), 85: enum(1), 174: enum(0), 32: b'\xa4\xff\xff\xff\xff' * 2,
                              38: b'\x0e\x0c' + bytes([126, 12, 25, 255]) + b'\x0f\x2e\xb4\x00\x00\x00\x00' + enum(0)
                                  + b'\x2f\x39\x0a'}

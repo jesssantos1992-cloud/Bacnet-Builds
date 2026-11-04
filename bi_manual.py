@@ -596,7 +596,7 @@ its type. Double-click a row to open the point.</li>
 <li><b>Show packets</b> shows this device's packets in the open capture.</li>
 </ul>
 <h3>A category</h3>
-<p>Click a category to list its points with their values. The values on screen are read again every few seconds (every 5 seconds over BACnet/IP, 10 over MS/TP), so they always show what the device has now.</p>
+<p>Click a category to list its points with their values. The values on screen are read again every few seconds (every 5 seconds over BACnet/IP, 10 over MS/TP), so they always show what the device has now. For multi-state points (inputs, outputs and values) the <b>States</b> column lists what each number means, read from the device's state text, and the value shows its state too, for example <i>2 – Low</i>.</p>
 <h3>A point</h3>
 <p>Click a point (in the tree or in the list) and its details slide in on the right, so the list stays in view. Click
 another point to switch; press {k('Esc')} or × to close the panel.</p>

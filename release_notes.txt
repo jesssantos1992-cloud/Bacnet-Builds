@@ -4,3 +4,4 @@
 - Discover: point values on a category page (Analog Inputs, Binary Outputs and so on) and in the point panel now update by themselves every few seconds, so they always show the real value. Refresh values and Read now are gone.
 - The sidebar shows the Wirescope icon and name (ACCS stays in Help > About, the manual and reports).
 - Fixed: in light mode the capture tab names could be invisible after switching theme.
+- Discover: multi-state points show what each state means (from the device's state text), and the value shows its state, for example 2 – Low.
