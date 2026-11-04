@@ -499,6 +499,9 @@ what is different:</p>
 """)
 
 ch('discover', 'Discover: finding devices', 'Discover', f"""
+<p>Click a <b>network</b> on the left to see its devices and whether each answered. <b>Discover this network</b>
+sends a Who-Is to that network only and reads the details and points of every device that answers, so one network can
+be checked again without scanning the whole site.</p>
 <p>Discover starts with an empty list every time the app opens, and the capture tabs from last time are not reopened.
 <b>Clear list</b> (next to the search box) empties the list: the discovered devices are forgotten and the open capture's
 devices are hidden here (the capture itself stays open). Press <b>Undo</b> on the message to bring them back.</p>
@@ -593,13 +596,13 @@ its type. Double-click a row to open the point.</li>
 <li><b>Show packets</b> shows this device's packets in the open capture.</li>
 </ul>
 <h3>A category</h3>
-<p>Click a category to list its points with their values. <b>Refresh values</b> reads them all again.</p>
+<p>Click a category to list its points with their values. The values on screen are read again every few seconds (every 5 seconds over BACnet/IP, 10 over MS/TP), so they always show what the device has now.</p>
 <h3>A point</h3>
 <p>Click a point (in the tree or in the list) and its details slide in on the right, so the list stays in view. Click
 another point to switch; press {k('Esc')} or × to close the panel.</p>
 <ul>
 <li><b>Summary</b> – the present value in large type, a warning if the point is in alarm, its name and description,
-and <b>Read now</b>, <b>Write…</b> (commandable points only) and <b>Show packets</b>.</li>
+(it updates by itself), and <b>Write…</b> (commandable points only), <b>Watch live</b> and <b>Show packets</b>.</li>
 <li><b>Details</b> – <b>Alarm &amp; status</b> (status flags, event state, high and low limits, deadband, notification
 class), the <b>priority array</b> for commandable points (which priority is in control) and the relinquish default.
 <b>Technical details</b> holds calibration, the BACnet configuration (object ID, type, a copyable

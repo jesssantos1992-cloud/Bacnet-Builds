@@ -1,2 +1,4 @@
 - Every start is fresh: Discover starts with an empty device list and last time's capture tabs are not reopened.
 - Discover: a Clear list button empties the device list (Undo brings it back).
+- Discover: click a network on the left to see its devices, and press Discover this network to find and read just that network again. The New discover button at the top is gone.
+- Discover: point values on a category page (Analog Inputs, Binary Outputs and so on) and in the point panel now update by themselves every few seconds, so they always show the real value. Refresh values and Read now are gone.

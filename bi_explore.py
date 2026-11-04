@@ -663,6 +663,57 @@ class Explorer:
             return
         self._scan_finish(on_done)
 
+    @staticmethod
+    def in_group(d, net):
+        """Is discovered device d on this network ('local', 'mstp' or a network number)?"""
+        if net == 'mstp':
+            return is_mstp(d) and d.get('sn') is None
+        if net == 'local':
+            return not is_mstp(d) and d.get('sn') is None
+        return d.get('sn') == net
+
+    def scan_net(self, net):
+        """Who-Is to one network only, then read the names of the devices on it that answered.
+        net: 'local' (this IP subnet), 'mstp' (the trunk) or a network number behind a router."""
+        self.stop = False
+        self.busy = 'netscan'
+        self.msg = 'Looking for devices on ' + ('this network' if net in ('local', 'mstp') else f'network {net}') + '…'
+        self.notify()
+        mstp = self.mode == 'mstp'
+        for d in list(self.devs.values()):
+            if is_mstp(d) == mstp and self.in_group(d, net):
+                d['old'] = 1
+        route = {'dnet': net, 'dadr': []} if isinstance(net, int) else None      # an empty DADR: everyone on that network
+        ap = [0x10, 8]
+        bbmd = (self.opt.get('bbmd') or '').strip()
+        dest = self.opt.get('to') or 'broadcast'
+        try:
+            for _ in range(2):
+                if self.stop:
+                    break
+                if mstp:
+                    self.send_mstp(255, ex_npdu(route, ap, 0, route is None), False)
+                    time.sleep(3.0)
+                    continue
+                pkt = ex_wrap(route, ap, 0, route is None, 0x0B)
+                self.send('broadcast' if dest == 'broadcast' else (dest if ':' in dest else dest + ':47808'), pkt)
+                if bbmd and route is not None:
+                    self.send(bbmd if ':' in bbmd else bbmd + ':47808', ex_wrap(route, ap, 0, False, 0x09))
+                time.sleep(2.2)
+        except RuntimeError as e:
+            self.busy = ''
+            self.msg = ('' if mstp else 'Could not send: ') + str(e)
+            self.notify()
+            return []
+        found = [d for d in list(self.devs.values()) if not d.get('old') and is_mstp(d) == mstp and self.in_group(d, net)]
+        self.msg = f'Found {len(found)} – reading names…'
+        self.notify()
+        self.pool_map([d for d in found if not d.get('name') or d.get('st') == 'found'], 4, self.info)
+        self.labels_from_names()
+        self.busy = ''
+        self.notify()
+        return found
+
     def _scan_ip(self, ap, dest, bbmd):
         """Who-Is over BACnet/IP: broadcast (or to one address), optionally through a BBMD."""
         def addr(a):                                       # '10.0.0.5' or '10.0.0.5:47809'

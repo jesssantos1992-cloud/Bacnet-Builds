@@ -5,6 +5,7 @@ network, with the guarded write dialog. The network work itself is in bi_explore
 from __future__ import annotations
 
 import re
+import threading
 import time
 
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -60,14 +61,13 @@ class DiscoverView(QWidget):
         self.armpill = Pill('WRITE ACCESS ON', 'SERIOUS')
         bl.addWidget(self.armpill)
         bl.addStretch(1)
-        self.b_new = QPushButton('New discover')
         self.b_scan = QPushButton('Scan network')
         self.b_opts = QPushButton('Options…')
         self.b_inv = QPushButton('Site inventory…')
         self.b_inv.setToolTip('Read the details and object list of every device, then save an Excel inventory with point counts')
         self.b_arm = QPushButton('Enable write access…')
         self.b_arm.setToolTip('Allow Write Property for a limited time')
-        for b in (self.b_new, self.b_scan, self.b_opts, self.b_inv, self.b_arm):
+        for b in (self.b_scan, self.b_opts, self.b_inv, self.b_arm):
             bl.addWidget(b)
         v.addWidget(bar)
         v.addWidget(self._conn_bar())
@@ -93,6 +93,11 @@ class DiscoverView(QWidget):
         qr.addWidget(self.clr)
         ll.addLayout(qr)
         self.hide_cap = set()                  # capture tabs whose devices were cleared from this list
+        self._live_busy = False
+        self.nrun = self.nres = None           # Discover this network: what is running, and the last result
+        self.live_tbl = self.live_big = None   # what is on screen with a live value: (table, rows, device), (label, row, device)
+        self._lt = QTimer(self, timeout=self.live_tick)
+        self._lt.start(1000)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
@@ -179,7 +184,6 @@ class DiscoverView(QWidget):
         self.split.setSizes([320, 900])
         self.split.setStretchFactor(1, 1)
         v.addWidget(self.split, 1)
-        self.b_new.clicked.connect(self.new_discover)
         self.b_scan.clicked.connect(lambda: self.scan())
         self.b_opts.clicked.connect(self.options)
         self.b_inv.clicked.connect(self.inventory)
@@ -554,7 +558,6 @@ class DiscoverView(QWidget):
         self.b_arm.setStyleSheet('QPushButton{background:#c42b1c;color:white}' if armed else '')
         AL = self.all_devs()
         D = [d for d in AL if d['ex'] or d['key'] in self.vis]
-        self.b_new.setVisible(bool(D))
         ms = self.ex.mode == 'mstp'
         self.b_scan.setText('Stop scan' if self.ex.busy == 'scan' else 'Scan MS/TP trunk' if ms else 'Scan network')
         self.b_opts.setVisible(not ms)                   # broadcast address / BBMD options are IP-only
@@ -653,6 +656,8 @@ class DiscoverView(QWidget):
                                          + f"  · {len(L)} device{'' if len(L) == 1 else 's'}"])
                 g.setData(0, K_ROLE, ('g', gk))
                 g.setFont(0, bold)
+                if sel and sel.get('g') == k:
+                    cur = g
                 for d in L:
                     e = d['ex']
                     dot, col, tip = self._dot(d)
@@ -661,7 +666,7 @@ class DiscoverView(QWidget):
                     it.setToolTip(0, '\n'.join(str(x) for x in (tip, d['name'], d['vendor'], d['ip']) if x))
                     it.setForeground(0, QColor(colors()['fg']))
                     it.setData(0, K_ROLE, ('d', d['key']))
-                    if sel and sel['k'] == d['key'] and sel.get('t') is None and sel.get('o') is None:
+                    if sel and sel.get('k') == d['key'] and sel.get('t') is None and sel.get('o') is None:
                         cur = it
                     if e and e.get('objs'):
                         for t, os_ in self.ex.cats(e):
@@ -672,13 +677,13 @@ class DiscoverView(QWidget):
                             ci = QTreeWidgetItem(it, [f"{E.cat_name(t)}  ({len(os2)})"])
                             ci.setData(0, K_ROLE, ('c', e['key'], t))
                             ci.setForeground(0, mu)
-                            if sel and sel['k'] == e['key'] and sel.get('t') == t and sel.get('o') is None:
+                            if sel and sel.get('k') == e['key'] and sel.get('t') == t and sel.get('o') is None:
                                 cur = ci
                             for o in sorted(os2, key=lambda o: C.natural_key(o['name']))[:800]:
                                 pi = QTreeWidgetItem(ci, [o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"])
                                 pi.setData(0, K_ROLE, ('p', e['key'], o['o']))
                                 pi.setToolTip(0, f"{o['val']} {o['u']}".strip())
-                                if sel and sel['k'] == e['key'] and sel.get('o') == o['o']:
+                                if sel and sel.get('k') == e['key'] and sel.get('o') == o['o']:
                                     cur = pi
                             ci.setExpanded(ck in self.open or bool(q))
                         it.setExpanded(e['key'] in self.open or bool(q))
@@ -710,10 +715,12 @@ class DiscoverView(QWidget):
         if self._building or not it:
             return
         d = it.data(0, K_ROLE)
-        if not d or d[0] in ('g', 'pk'):
+        if not d or d[0] == 'pk' or (d[0] == 'g' and self.pk):
             return
         prev = self.node
-        if d[0] == 'd':
+        if d[0] == 'g':
+            self.node = {'g': self.gkey(d[1])}
+        elif d[0] == 'd':
             self.select(d[1])
         elif d[0] == 'c':
             self.node = {'k': d[1], 't': d[2]}
@@ -745,13 +752,16 @@ class DiscoverView(QWidget):
         p.setUpdatesEnabled(False)
         p.clear()
         n = self.node
-        en = self.entry(n['k']) if n else None
+        en = self.entry(n['k']) if n and n.get('k') else None
         e = en['ex'] if en else None
         row = next((o for o in (e or {}).get('objs') or [] if o['o'] == n.get('o')), None) if en and n.get('o') is not None else None
         self.nav_bar(n, en, row)
         if not (row and e):
             self.hide_inspector()
-        if not n or not en:
+        self.live_tbl = self.live_big = None
+        if n and n.get('g') is not None:
+            self.net_page(p, n['g'], AL)
+        elif not n or not en:
             self.start_page(p, D, AL)
         else:
             if row and e:
@@ -873,15 +883,18 @@ class DiscoverView(QWidget):
         parts = [('Discover', self.home if (n or self.pk) else None)]
         if self.pk:
             parts.append(('Choose devices', None))
+        elif n and n.get('g') is not None:
+            parts.append((self.grp_name(n['g'], True), None))
         elif n and en:
-            parts.append((self.grp_name(self.grp(en), True), None))
+            gk = self.grp(en)
+            parts.append((self.grp_name(gk, True), lambda _=False, gk=gk: self.go_node({'g': gk})))
             nm_ = dev_name(en['name'], en['id'])
             dev = f"Device {en['id']}" + (f" “{nm_}”" if nm_ else '')
             deeper = n.get('t') is not None or n.get('o') is not None
-            parts.append((dev, (lambda k=n['k']: self.go_node({'k': k})) if deeper else None))
+            parts.append((dev, (lambda _=False, k=n['k']: self.go_node({'k': k})) if deeper else None))
             t = n['t'] if n.get('t') is not None else E.o_t(n['o']) if n.get('o') is not None else None
             if t is not None:
-                parts.append((E.cat_name(t), (lambda k=n['k'], t=t: self.go_node({'k': k, 't': t})) if n.get('o') is not None else None))
+                parts.append((E.cat_name(t), (lambda _=False, k=n['k'], t=t: self.go_node({'k': k, 't': t})) if n.get('o') is not None else None))
             if n.get('o') is not None:
                 parts.append((row['name'] or f"{E.sd_ty(row['ty'])} {row['inst']}" if row else 'Point', None))
         for i, (text, fn) in enumerate(parts):
@@ -897,6 +910,161 @@ class DiscoverView(QWidget):
             else:
                 self.crumbs.addWidget(label(text, bold=(i == len(parts) - 1), wrap=False))
         self.crumbs.addStretch(1)
+
+    @staticmethod
+    def gkey(gk):
+        """The tree's group key ('n2401', 'nlocal', 'nmstp') back to 2401 / 'local' / 'mstp'."""
+        k = gk[1:]
+        return int(k) if k.isdigit() else k
+
+    def net_devs(self, k, AL=None):
+        return [d for d in (AL if AL is not None else self.all_devs()) if self.grp(d) == k]
+
+    def net_page(self, p, k, AL):
+        """One network: its devices, and Discover this network (Who-Is to it, then read every device that answers)."""
+        L = self.net_devs(k, AL)
+        lab = self.win.labels.n(k) if isinstance(k, int) else ''
+        p.add(label(self.grp_name(k) + (f' “{lab}”' if lab else ''), bold=True, size=17))
+        on = [d for d in L if d['ex'] and not d['ex'].get('old')]
+        p.add(label(f"{len(L)} device{'' if len(L) == 1 else 's'}" + (f' · {len(on)} answered' if on else ''), muted=True))
+        run = getattr(self, 'nrun', None)
+        mine = run and run['k'] == k
+        r = QHBoxLayout()
+        if mine:
+            st = QPushButton('Stop')
+            st.clicked.connect(lambda: (run.__setitem__('stop', True), setattr(self.ex, 'stop', True)))
+            r.addWidget(st)
+            r.addWidget(U.busy_row(run['msg']))
+        else:
+            go = U.primary(QPushButton('Discover this network'))
+            go.setToolTip('Send a Who-Is to this network only, then read the details and points of every device that answers')
+            go.setEnabled(not self.ex.busy and not run)
+            go.clicked.connect(lambda: self.discover_net(k))
+            r.addWidget(go)
+            if run:
+                r.addWidget(label(f"Discovering {self.grp_name(run['k'], True).lower()} – wait for it to finish", muted=True, wrap=False))
+            elif getattr(self, 'nres', None) and self.nres[0] == k:
+                r.addWidget(label(self.nres[1], muted=True, wrap=False))
+        r.addStretch(1)
+        ww = QWidget()
+        ww.setLayout(r)
+        p.add(ww)
+        c = colors()
+        rows, data = [], []
+        for d in L:
+            e = d['ex']
+            st = ('not discovered yet', c['mu']) if not e else ('did not answer', c['se']) if e.get('old') else ('online', c['no'])
+            rows.append([d['id'], d['name'], d['vendor'], d['model'], (e and E.Explorer.addr(e)) or d['ip'],
+                         (st[0], {'fg': st[1]}), len(e.get('objs') or []) if e and e.get('objs') else ''])
+            data.append(d['key'])
+        t = Table(['Device ID', 'Name', 'Manufacturer', 'Model', 'Address', 'Status', 'Points'])
+        t.fill(rows, data)
+        t.rowActivated.connect(lambda key: key and self.open_device(key))
+        t.fit_height(40)
+        p.add(t)
+        p.add(label('Double-click a device to open it.', muted=True))
+
+    def discover_net(self, k):
+        """Who-Is to network k, then read the details and points of every device on it that answered."""
+        if self.ex.busy or getattr(self, 'nrun', None):
+            return self.win.toast('Wait for Discover to finish, or press Stop first')
+        if self.ex.mode == 'mstp' and not (self.ex.link and self.ex.link.on and self.ex.link.joined):
+            return self._ms_msg('Join the MS/TP trunk first (choose the port, press Find a free MAC, then Join trunk).', True)
+        self.live = True
+        run = self.nrun = {'k': k, 'msg': 'Sending a Who-Is…', 'stop': False}
+        self.refresh()
+
+        def work():
+            found = self.ex.scan_net(k)
+            ok = 0
+            todo = [] if run['stop'] else [d['key'] for d in self.net_devs(k) if d['ex'] and not d['ex'].get('old')]
+            for i, key in enumerate(todo):
+                if run['stop']:
+                    break
+                a = self.entry(key)
+                e = a and a['ex']
+                if not e:
+                    continue
+                run['msg'] = f"Reading device {e['id']} ({i + 1} of {len(todo)})…"
+                self.ex.busy = 'netscan'
+                self.ex.notify()
+                try:
+                    if not e.get('name'):
+                        self.ex.info(e)
+                    e['stale'] = 1
+                    self.ex.browse(e)
+                    ok += 1
+                except Exception as x:
+                    e['pm'] = f'Could not read: {x}'
+            missing = len(self.net_devs(k)) - len(found)
+
+            def done():
+                self.nrun = None
+                self.ex.busy = ''
+                self.ex.stop = False
+                self.nres = (k, ('Stopped. ' if run['stop'] else 'Done. ') + f'{len(found)} answered, {ok} read'
+                             + (f', {missing} did not answer' if missing > 0 else '') + f" · {time.strftime('%H:%M')}")
+                self.win.labels_changed()
+                self.refresh()
+            self.win.on_ui(done)
+        self.ex.run(work)
+
+    LIVE_S = {'ip': 5, 'mstp': 10}             # how often the values on screen are read again (seconds)
+
+    def live_text(self, e):
+        t = e.get('live_at')
+        return ('● Live: values update every ' + f"{self.LIVE_S[self.ex.mode]} seconds"
+                + (f" · read {time.strftime('%H:%M:%S', time.localtime(t))}" if t else ''))
+
+    def live_tick(self):
+        """Read the present values on screen again (the open category and the open point), and update them in place."""
+        if self._live_busy or self.win.cur_view != 'x' or not self.isVisible() or self.ex.busy or self.pk:
+            return
+        tbl, big = getattr(self, 'live_tbl', None), getattr(self, 'live_big', None)
+        rows, e = [], None
+        if tbl:
+            rows, e = list(tbl[1]), tbl[2]
+        if big and (not rows or big[1] not in rows):
+            rows.append(big[1])
+            e = e or big[2]
+        if not rows or not e or time.time() - e.get('live_at', 0) < self.LIVE_S[self.ex.mode]:
+            return
+        self._live_busy = True
+        e['live_at'] = time.time()
+        B = [rows[i:i + 8] for i in range(0, len(rows), 8)]
+
+        def one(b):
+            r = self.ex.req(e, E.ex_rpm([[x['o'], [85]] for x in b]), 4.0, 1)
+            got = {x['o']: x['pr'] for x in E.ex_dec_rpm(r['d'], r['k'], r['L'])} if r.get('d') else {}
+            for x in b:
+                v = (got.get(x['o']) or {}).get(85)
+                if v:
+                    x['val'] = E.pv_text(x['ty'], v[0])
+
+        def work():
+            self.ex.pool_map(B, 1 if E.is_mstp(e) else 3, one)
+            e['live_at'] = time.time()
+            self.win.on_ui(self.live_paint)
+        threading.Thread(target=work, daemon=True).start()
+
+    def live_paint(self):
+        self._live_busy = False
+        self.nrun = self.nres = None           # Discover this network: what is running, and the last result
+        tbl, big = getattr(self, 'live_tbl', None), getattr(self, 'live_big', None)
+        try:
+            if tbl:
+                t, os_, e = tbl
+                for i, o in enumerate(os_):
+                    it = t.item(i, 2)
+                    txt = f"{o['val']} {o['u']}".strip()
+                    if it is not None and it.text() != txt:
+                        it.setText(txt)
+                self.live_lab.setText(self.live_text(e))
+            if big:
+                b, o, _e = big
+                b.setText(f"{o['val']} {o['u']}".strip() or '—')
+        except RuntimeError:                          # the page was rebuilt while reading
+            pass
 
     def start_page(self, p, D, AL):
         cap = [d for d in AL if d['cap']]
@@ -1115,10 +1283,8 @@ class DiscoverView(QWidget):
         p.add(label(f"{len(os_)} point{'' if len(os_) == 1 else 's'} in device {en['id']}" + (f" “{nm_}”" if nm_ else '')
                     + ' · click a point to see its details', muted=True))
         r = QHBoxLayout()
-        b = QPushButton('Refresh values')
-        b.setEnabled(not self.ex.busy)
-        b.clicked.connect(lambda: self.ex.run(self.ex.values_all, e))
-        r.addWidget(b)
+        self.live_lab = label(self.live_text(e), muted=True, wrap=False)
+        r.addWidget(self.live_lab)
         r.addWidget(label(e.get('pm') or '', muted=True, wrap=False))
         r.addStretch(1)
         ww = QWidget()
@@ -1137,6 +1303,7 @@ class DiscoverView(QWidget):
                 QTimer.singleShot(0, lambda t=t, i=i: t.scrollTo(t.model().index(i, 0)))
         t.fit_height(40)
         p.add(t)
+        self.live_tbl = (t, os_, e)
         self.wlog(p, en['id'])
 
     def point_page(self, p, en, e, o):
@@ -1163,8 +1330,9 @@ class DiscoverView(QWidget):
         bf.setWeight(QFont.Weight.DemiBold)
         big.setFont(bf)
         big.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        big.setToolTip('Present value')
+        big.setToolTip('Present value, read from the device every few seconds')
         sv.addWidget(big)
+        self.live_big = (big, o, e)
         flags = (pd or {}).get('flags')
         if flags and flags != 'normal':
             fl_ = label(f'⚠ {flags}', bold=True)
@@ -1310,10 +1478,6 @@ class DiscoverView(QWidget):
     def _point_buttons(self, en, e, o, wr, details=False):
         r = QHBoxLayout()
         r.setSpacing(8)
-        b = QPushButton('Read now')
-        b.setEnabled(not self.ex.busy)
-        b.clicked.connect(lambda: self.ex.run(self.ex.read_one, e, o))
-        r.addWidget(b)
         if wr:
             w = QPushButton('Write…')
             w.clicked.connect(lambda: write_dialog(self.win, e, o))
@@ -1540,7 +1704,7 @@ class DiscoverView(QWidget):
 
         def forget():
             self.ex.devs.pop(ex['key'], None)
-            if self.node and self.node['k'] == ex['key']:
+            if self.node and self.node.get('k') == ex['key']:
                 self.node = None
             self.ex.cache()
             self.refresh()
