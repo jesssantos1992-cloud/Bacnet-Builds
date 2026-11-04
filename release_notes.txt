@@ -1,5 +1,2 @@
-- Site health audit (Capture menu): reads every point on site and lists the ones in fault, in alarm, out of service or overridden, trend logs that are switched off and wrong clocks. Export it, and it goes in the site report.
-- Device clocks: check every device clock against this PC (Capture menu, or Check clock on a device).
-- Trend logs: Show history on a trend log reads its stored values from the device and graphs them.
-- Schedules: Show schedule shows the week as a chart, with holidays and special days.
-- Watch live: graph up to 12 points as their values change.
+- Every start is fresh: Discover starts with an empty device list and last time's capture tabs are not reopened.
+- Discover: a Clear list button empties the device list (Undo brings it back).

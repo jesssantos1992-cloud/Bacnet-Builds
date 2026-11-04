@@ -342,13 +342,7 @@ class Explorer:
         self.opt.update(store.get('bi_discopt', {}) or {})
         self.wlog = store.get('bi_wlog', []) or []
         self.auto_labels = set(store.get('bi_autolab', []) or [])
-        c = store.get('bi_disc')
-        if c:
-            self.scan_at = c.get('at') or 0
-            for d in c.get('d') or []:
-                d = dict(d)
-                d.update(st='last scan', old=1, objs=None)
-                self.devs[d['key']] = d
+        store.set('bi_disc', None)                         # Discover starts empty every time (older versions kept the list)
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix='bacnet-discover')
         self.link = None                                   # bi_mstp.MstpLink while joined to an MS/TP trunk
         self.mode = store.get('bi_dmode') or 'ip'          # 'ip' or 'mstp': how Discover reaches devices
@@ -366,9 +360,19 @@ class Explorer:
         self.store.set('bi_discopt', self.opt)
 
     def cache(self):
-        keep = ('key', 'id', 'ip', 'port', 'route', 'sn', 'sa', 'mx', 'sg', 'vn', 'name', 'vendor', 'model', 'fw', 'sw',
-                'desc', 'loc', 'via', 'mac')
-        self.store.set('bi_disc', {'at': self.scan_at, 'd': [{k: d.get(k) for k in keep} for d in list(self.devs.values())]})
+        """Discovered devices are not kept when the app closes: every start is a fresh list."""
+
+    def clear(self):
+        """Forget every discovered device. Returns what was there, so it can be put back (Undo)."""
+        old = (self.devs, self.scan_at, self.audit)
+        self.devs, self.scan_at, self.audit = {}, 0, None
+        self.msg = ''
+        self.notify()
+        return old
+
+    def unclear(self, old):
+        self.devs, self.scan_at, self.audit = old
+        self.notify()
 
     def send(self, dest, b):
         err = self.relay.send(dest, bytes(b))

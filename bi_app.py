@@ -1775,7 +1775,10 @@ class MainWindow(QMainWindow):
         threading.Thread(target=work, daemon=True).start()
 
     def on_ui(self, fn):
-        self.bridge.call.emit(fn)
+        try:
+            self.bridge.call.emit(fn)
+        except RuntimeError:            # the window has closed while a background job was finishing
+            pass
 
     def start_stop(self):
         s = self.live.cur()
@@ -2359,12 +2362,8 @@ class MainWindow(QMainWindow):
     def restore_session(self):
         self._restoring = True
         try:
-            s = BL.load_session()
+            # The app starts fresh: last time's capture tabs are not reopened (only a file it was asked to open)
             first = getattr(self, 'open_first', None)
-            for t in s.get('tabs') or []:
-                p = t.get('path')
-                if p and os.path.isfile(p):
-                    self.open_path(p, t.get('q') or '', activate=(p == s.get('active') and not first))
             if first:
                 self.open_path(first)
         finally:

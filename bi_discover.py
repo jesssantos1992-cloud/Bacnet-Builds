@@ -84,7 +84,15 @@ class DiscoverView(QWidget):
         self.q = QLineEdit()
         self.q.setPlaceholderText('Search devices and points')
         self.q.setClearButtonEnabled(True)
-        ll.addWidget(self.q)
+        qr = QHBoxLayout()
+        qr.setSpacing(6)
+        qr.addWidget(self.q, 1)
+        self.clr = QPushButton('Clear list')
+        self.clr.setToolTip('Empty this list: forget the discovered devices and hide the capture’s devices here')
+        self.clr.clicked.connect(self.clear_list)
+        qr.addWidget(self.clr)
+        ll.addLayout(qr)
+        self.hide_cap = set()                  # capture tabs whose devices were cleared from this list
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
@@ -459,9 +467,32 @@ class DiscoverView(QWidget):
         return f'Network {k}'
 
     # ----------------------------------------------------------------- data --
+    def clear_list(self):
+        """Empty the device list. The capture itself stays open; Undo puts everything back."""
+        if self.ex.busy:
+            return self.win.toast('Wait for Discover to finish, or press Stop first')
+        tab = self.win.ac
+        had_cap = tab is not None and tab not in self.hide_cap and bool(self.win.FD.dv)
+        if not self.ex.devs and not had_cap:
+            return self.win.toast('The list is already empty')
+        old = self.ex.clear()
+        if had_cap:
+            self.hide_cap.add(tab)
+        prev = self.node
+        self.node = None
+        self.vis = set()
+        self.refresh()
+
+        def undo():
+            self.ex.unclear(old)
+            self.hide_cap.discard(tab)
+            self.node = prev
+            self.refresh()
+        self.win.toast('Device list cleared', undo)
+
     def sd_devs(self):
         """Devices from the capture and from discovery, in one list (the original's sdDevs)."""
-        F = self.win.FD
+        F = self.win.FD if self.win.ac not in self.hide_cap else C.Analysis()
         out, used = [], set()
         ex = list(self.ex.devs.values())
         nmv = F.nm or {}

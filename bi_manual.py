@@ -499,6 +499,9 @@ what is different:</p>
 """)
 
 ch('discover', 'Discover: finding devices', 'Discover', f"""
+<p>Discover starts with an empty list every time the app opens, and the capture tabs from last time are not reopened.
+<b>Clear list</b> (next to the search box) empties the list: the discovered devices are forgotten and the open capture's
+devices are hidden here (the capture itself stays open). Press <b>Undo</b> on the message to bring them back.</p>
 <p><b>Discover</b> ({k('Ctrl+5')}) talks to the network directly. It lists the devices from your open capture and the
 devices it finds itself, side by side, grouped by network on the left.</p>
 <h3>Connection</h3>
