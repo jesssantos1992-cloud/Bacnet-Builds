@@ -5,3 +5,8 @@
 - The sidebar shows the Wirescope icon and name (ACCS stays in Help > About, the manual and reports).
 - Fixed: in light mode the capture tab names could be invisible after switching theme.
 - Discover: multi-state points show what each state means (from the device's state text), and the value shows its state, for example 2 – Low.
+- View > Temperature: show temperatures in °F, °C or as each device sends them. Writes are converted back to the device's unit.
+- Writing a multi-state point: pick the state by name from a list.
+- Values on a Discover page are read as soon as it opens.
+- Live watch shows units, and no low / high for on/off points.
+- Trend logs mark where the clocks changed for daylight saving; EDE files include the unit code.

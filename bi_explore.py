@@ -7,6 +7,7 @@ that one guarded write - this module cannot change a device in any other way.
 """
 from __future__ import annotations
 
+import re
 import struct
 import threading
 import time
@@ -303,6 +304,62 @@ def ip_of(k):
 
 
 MS_T = (13, 14, 19)                     # multi-state input, output and value
+TEMP_PREF = ''                           # '' = as the device sends it, 'F' or 'C': how temperatures are shown (View menu)
+_TEMP = {62: 'C', 64: 'F'}               # BACnet unit codes: degrees Celsius, degrees Fahrenheit
+_NUM = re.compile(r'^\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)(.*)$')
+
+
+def temp_to(uc):
+    """'F' or 'C' when a value in unit `uc` is shown converted, else None."""
+    src = _TEMP.get(uc)
+    return TEMP_PREF if src and TEMP_PREF and TEMP_PREF != src else None
+
+
+def conv(x, uc, delta=False, back=False):
+    """A temperature (or, with delta, a difference such as a deadband) from the device's unit to the one shown,
+    or with back=True from the one shown to the device's."""
+    t = temp_to(uc)
+    if t is None or x is None:
+        return x
+    to_f = (t == 'F') != back
+    if delta:
+        return x * 1.8 if to_f else x / 1.8
+    return x * 1.8 + 32 if to_f else (x - 32) / 1.8
+
+
+def num_fmt(x, places=2):
+    s = f'{x:.{places}f}'.rstrip('0').rstrip('.')
+    return '0' if s in ('-0', '') else s
+
+
+def temp_text(s, uc, delta=False):
+    """A value's text in the temperature unit chosen in the View menu (other text is left alone)."""
+    m = _NUM.match(str(s or ''))
+    if not m or temp_to(uc) is None:
+        return s
+    return num_fmt(conv(float(m.group(1)), uc, delta)) + m.group(2)
+
+
+def unit_of(row):
+    t = temp_to(row.get('uc'))
+    return {'C': '°C', 'F': '°F'}[t] if t else row.get('u', '') or ''
+
+
+def temp_pd(pd, row):
+    """A point's details with its limits, priority array and increments in the chosen temperature unit."""
+    uc = row.get('uc')
+    if not pd or temp_to(uc) is None:
+        return pd
+    g = dict(pd)
+    for k in ('min', 'max', 'hi', 'lo', 'rd'):
+        if g.get(k):
+            g[k] = temp_text(g[k], uc)
+    for k in ('cov', 'db', 'res'):
+        if g.get(k):
+            g[k] = temp_text(g[k], uc, True)
+    if g.get('pa'):
+        g['pa'] = [{**v, 's': temp_text(v['s'], uc) if v['a'] else v['s']} for v in g['pa']]
+    return g
 
 
 def state_name(row, val=None):
@@ -317,7 +374,10 @@ def state_name(row, val=None):
 
 def value_text(row):
     """The value as shown on screen: '72.5 °F', 'active', or '2 – Low' for a multi-state point."""
-    s = f"{row.get('val', '')} {row.get('u', '')}".strip()
+    v = str(row.get('val', '') or '').strip()
+    if not v:
+        return ''                                       # not read yet: no lone unit
+    s = f"{temp_text(v, row.get('uc'))} {unit_of(row)}".strip()
     nm = state_name(row) if row.get('ty') in MS_T else ''
     return f'{s} – {nm}' if s and nm else s
 
@@ -920,6 +980,7 @@ class Explorer:
             row['desc'] = unq(ds['s'])
         row['val'] = pv_text(row['ty'], v) if v else ''
         row['u'] = EXU.get(u['raw'], '') if u and u['raw'] is not None else ''
+        row['uc'] = u['raw'] if u else None
         row['ok'] = 1
 
     def values_all(self, dev):
@@ -1007,6 +1068,7 @@ class Explorer:
                     row['val'] = fm(v) or v['s']
                 if u and u['raw'] is not None:
                     row['u'] = EXU.get(u['raw'], '')
+                    row['uc'] = u['raw']
             else:
                 pd['err'] = 'No details came back.'
         else:

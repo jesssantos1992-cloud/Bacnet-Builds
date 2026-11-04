@@ -316,15 +316,35 @@ class TrendDialog(QDialog):
         self.more.setEnabled(True)
         self.exp.setEnabled(bool(recs))
         self.chart.empty = 'No values in this trend log'
-        self.chart.show_point({'s': [(t, x, n, None) for t, x, n, st in recs if not st], 'w': []})
-        rows = [[stamp(t), x if not st else '', st] for t, x, n, st in reversed(recs[-3000:])]
+        self.recs = recs = self.shown(r)
+        if any(st == 'daylight saving' for _t, _x, _n, st in recs):
+            self.sub.setText(self.sub.text() + ' · the clocks changed for daylight saving during this log (marked in the list)')
+        self.chart.show_point({'s': [(t, x, n, None) for t, x, n, st in recs if not st or st == 'daylight saving'], 'w': []})
+        rows = [[stamp(t), x if st in ('', 'daylight saving') else '', st] for t, x, n, st in reversed(recs[-3000:])]
         self.tbl.fill(rows)
+
+    @staticmethod
+    def shown(r):
+        """The records in the temperature unit chosen in View (with the unit), a daylight saving change marked."""
+        uc = r.get('uc')
+        u = E.unit_of({'uc': uc, 'u': E.EXU.get(uc, '') if uc is not None else ''})
+        out, dst = [], None
+        for t, x, n, st in r['recs']:
+            if not st:
+                x, n = (E.temp_text(x, uc) + (f' {u}' if u else '')), E.conv(n, uc)
+            d = time.localtime(t).tm_isdst
+            if dst is not None and d != dst and not st:
+                st = 'daylight saving'
+            dst = d
+            out.append((t, x, n, st))
+        return out
 
     def export(self):
         r = self.res
         if r and r['recs']:
             _save(self.win, f"trend-{self.dev['id']}-{self.row['inst']}.csv",
-                  csv_text('Time,Value,Note', [[stamp(t), x if not st else '', st] for t, x, n, st in r['recs']]))
+                  csv_text('Time,Value,Note', [[stamp(t), x if st in ('', 'daylight saving') else '', st]
+                                               for t, x, n, st in self.shown(r)]))
 
 
 # ================================================================ schedule --
@@ -511,8 +531,8 @@ class WatchWindow(QDialog):
             return
         if len(self.pts) >= self.MAX:
             return self.win.toast(f'Up to {self.MAX} points can be watched at once')
-        s = []
-        self.pts.append({'dev': dev, 'row': row, 's': s, 'e': {'s': s, 'w': []}, 'err': ''})
+        s = []                                     # what is shown (in the chosen temperature unit); 'raw' is as read
+        self.pts.append({'dev': dev, 'row': row, 's': s, 'raw': [], 'e': {'s': s, 'w': []}, 'err': ''})
         if E.is_mstp(dev) and self.iv.currentData() < 5:
             self.iv.setCurrentIndex(1)                      # MS/TP is slow: every 5 seconds
         self.next_at = 0.0
@@ -535,15 +555,23 @@ class WatchWindow(QDialog):
 
         def work():
             for p in pts:
-                r = self.ex.req(p['dev'], E.ex_rpm([[p['row']['o'], [85]]]), 4.0, 1)
+                row = p['row']
+                units = 'uc' not in row and row['ty'] in (0, 1, 2)          # read the units once
+                r = self.ex.req(p['dev'], E.ex_rpm([[row['o'], [85, 117] if units else [85]]]), 4.0, 1)
                 t = time.time()
                 if r.get('d'):
                     L = E.ex_dec_rpm(r['d'], r['k'], r['L'])
-                    v = L[0]['pr'].get(85) if L else None
+                    pr = L[0]['pr'] if L else {}
+                    v = pr.get(85)
+                    u = pr.get(117)
+                    if units and u and u[0]['raw'] is not None:
+                        row['uc'], row['u'] = u[0]['raw'], E.EXU.get(u[0]['raw'], '')
                     if v:
-                        txt = E.pv_text(p['row']['ty'], v[0])
+                        txt = E.pv_text(row['ty'], v[0])
                         num = (1.0 if txt == 'active' else 0.0) if txt in ('active', 'inactive') else _num(txt)
-                        p['s'].append((t, txt, num, None))
+                        p['raw'].append((t, txt, num, None))
+                        p['s'].append(self.shown(row, p['raw'][-1]))
+                        del p['raw'][:-5000]
                         del p['s'][:-5000]
                         p['err'] = ''
                         continue
@@ -557,18 +585,36 @@ class WatchWindow(QDialog):
             self.fill(keep=True)
             self.chart.update()
 
+    @staticmethod
+    def shown(row, x):
+        """A reading as shown: the temperature unit chosen in View, and a multi-state point's state name."""
+        t, txt, num, _ = x
+        if row['ty'] in E.MS_T:
+            nm = E.state_name(row, txt)
+            return (t, f'{txt} – {nm}' if nm else txt, num, None)
+        return (t, E.temp_text(txt, row.get('uc')), E.conv(num, row.get('uc')), None)
+
+    def retemp(self):
+        """The temperature unit was changed in View: show every reading in the new one."""
+        for p in self.pts:
+            p['s'][:] = [self.shown(p['row'], x) for x in p['raw']]
+        self.fill(keep=True)
+        self.chart.update()
+
     def fill(self, keep=False):
         c = colors()
         i = self.tbl.currentRow()
         rows = []
         for p in self.pts:
             s = p['s']
-            nums = [x[2] for x in s if x[2] is not None]
-            u = p['row'].get('u') or ''
+            onoff = p['row']['ty'] in (3, 4, 5) or p['row']['ty'] in E.MS_T      # low / high mean nothing for these
+            nums = [x[2] for x in s if x[2] is not None] if not onoff else []
+            u = E.unit_of(p['row']) if p['row']['ty'] not in E.MS_T else ''
             rows.append([dev_title(p['dev']), point_name(p['row']),
                          (p['err'], {'fg': c['se']}) if p['err'] else (f"{s[-1][1]} {u}".strip() if s else 'reading…', {'bold': True}),
                          time.strftime('%H:%M:%S', time.localtime(s[-1][0])) if s else '',
-                         f'{min(nums):.6g}' if nums else '', f'{max(nums):.6g}' if nums else '', len(s) or ''])
+                         f'{min(nums):.6g} {u}'.strip() if nums else '', f'{max(nums):.6g} {u}'.strip() if nums else '',
+                         len(s) or ''])
         self.tbl.blockSignals(True)
         self.tbl.fill(rows)
         self.tbl.snug(self.MAX)
@@ -584,12 +630,13 @@ class WatchWindow(QDialog):
         self.chart.show_point(p['e'] if p else None)      # the same point keeps its zoom as new values arrive
 
     def export(self):
-        rows = [[stamp(t), dev_title(p['dev']), p['dev']['id'], point_name(p['row']), x]
+        rows = [[stamp(t), dev_title(p['dev']), p['dev']['id'], point_name(p['row']), x,
+                 E.unit_of(p['row']) if p['row']['ty'] not in E.MS_T else '']
                 for p in self.pts for t, x, _n, _ in p['s']]
         if not rows:
             return self.win.toast('Nothing read yet')
         rows.sort(key=lambda r: r[0])
-        _save(self.win, 'watched-points.csv', csv_text('Time,Device,Device ID,Point,Value', rows))
+        _save(self.win, 'watched-points.csv', csv_text('Time,Device,Device ID,Point,Value,Unit', rows))
 
     def closeEvent(self, ev):
         self.t.stop()

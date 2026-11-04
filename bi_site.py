@@ -295,25 +295,34 @@ def _first(pr, p):
 
 
 def _binary_ref(ex, dev, o):
-    """Whether a trend log records a binary point (so 1 / 0 read as active / inactive)."""
+    """What a trend log records: (binary point?, 'analog input 1 present-value', unit code or None).
+    Binary points read 1 / 0 as active / inactive; the unit lets temperatures show in the unit chosen."""
     r = ex.rpc(dev, o, 132)
     x = _prop_value(r)
     if not x:
-        return False, ''
+        return False, '', None
     d, k, L = x
     a = C.tg(d, k)
     if a.cx and a.n == 0 and a.len == 4:
         ob = C.num(d[a.v:a.v + 4])
         b = C.tg(d, a.v + 4)
         prop = C.num(d[b.v:b.v + b.len]) if b.cx and b.n == 1 else 85
-        return 3 <= E.o_t(ob) <= 5, f"{E.sd_ty(E.o_t(ob))} {E.o_i(ob)} {E.prop_name(prop)}"
-    return False, ''
+        b2 = C.tg(d, b.v + b.len) if b.cx and b.n == 1 else None
+        uc = None
+        local = not (b2 and b2.cx and b2.n == 3 and b2.len == 4 and C.num(d[b2.v:b2.v + 4]) != E.oid(8, dev['id']))
+        if E.o_t(ob) in (0, 1, 2) and prop == 85 and local:
+            u = _prop_value(ex.rpc(dev, ob, 117))
+            if u:
+                t = C.tg(u[0], u[1])
+                uc = C.num(u[0][t.v:t.v + t.len]) if t.n == 9 else None
+        return 3 <= E.o_t(ob) <= 5, f"{E.sd_ty(E.o_t(ob))} {E.o_i(ob)} {E.prop_name(prop)}", uc
+    return False, '', None
 
 
 # ------------------------------------------------------------------- trend --
 def trend(ex, dev, o, limit=2000, progress=None):
     """The newest `limit` records of a trend log: {'name','what','n','total','recs','enabled','interval','err'}."""
-    out = {'name': '', 'what': '', 'recs': [], 'total': 0, 'enabled': None, 'interval': None, 'err': ''}
+    out = {'name': '', 'what': '', 'recs': [], 'total': 0, 'enabled': None, 'interval': None, 'err': '', 'uc': None}
     r = ex.req(dev, E.ex_rpm([[o, [77, RECORD_COUNT, 133, 134, 126]]]), 5.0)
     if not r.get('d'):
         out['err'] = _why(r)
@@ -326,7 +335,7 @@ def trend(ex, dev, o, limit=2000, progress=None):
     out['total'] = total
     out['enabled'] = (en['s'] == 'true') if en else None
     out['interval'] = iv['raw'] if iv else None
-    binary, out['what'] = _binary_ref(ex, dev, o)
+    binary, out['what'], out['uc'] = _binary_ref(ex, dev, o)
     if not total:
         return out
     per = max(4, min(60, ((dev.get('mx') or 480) - 40) // 26))

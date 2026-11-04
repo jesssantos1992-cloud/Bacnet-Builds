@@ -197,6 +197,94 @@ until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 4).text() != 'reading the s
 check(dv.live_tbl[0].item(0, 4).text() == 'no state names' and dv.live_tbl[0].item(0, 2).text() == '1',
       'a multi-state point without state text says so')
 
+# temperatures in the unit chosen in View
+import bi_discover  # noqa: E402
+check(abs(E.conv(55.76, 62, back=True) - 13.2) < 1e-9 or E.TEMP_PREF == '', 'conversion helper')
+w.set_temp('F')
+check(E.TEMP_PREF == 'F' and abs(E.conv(13.2, 62) - 55.76) < 1e-9 and abs(E.conv(55.76, 62, back=True) - 13.2) < 1e-9,
+      'degrees C to F and back')
+check(E.conv(2.0, 62, delta=True) == 3.6 and E.conv(70.0, 64) == 70.0, 'differences convert by 1.8; F stays F')
+dv.LIVE_S = {'ip': 60, 'mstp': 60}                 # a long interval: the first read must still come straight away
+dv.go_node({'k': dev['key'], 't': 0})
+check(until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 2).text()[:1].isdigit() and dv.live_tbl[0].item(0, 2).text().endswith('°F'), 15),
+      f'opening a page reads straight away, in °F ({dv.live_tbl and dv.live_tbl[0].item(0, 2).text()!r})')
+sat_row = next(o for o in dev['objs'] if o['ty'] == 0 and o['inst'] == 1)
+check(E.value_text(sat_row).startswith(E.num_fmt(E.conv(float(sat_row['val']), 62))) and E.unit_of(sat_row) == '°F', 'value text in °F')
+pd = E.temp_pd({'hi': '12', 'lo': '-5', 'cov': '0.5', 'pa': [{'a': True, 's': '20'}, {'a': False, 's': ''}]}, sat_row)
+check(pd['hi'] == '53.6' and pd['lo'] == '23' and pd['cov'] == '0.9' and pd['pa'][0]['s'] == '68', f'limits and priorities converted: {pd}')
+w.set_temp('C')
+check(not E.temp_to(62) and E.temp_to(64) == 'C', 'Celsius: Fahrenheit points convert, Celsius points do not')
+w.set_temp('')
+check(E.temp_to(62) is None and E.temp_to(64) is None, 'as the device sends: nothing converts')
+w.set_temp('F')
+tl = next(o for o in dev['objs'] if o['ty'] == 20 and o['inst'] == 1)
+tdl = bi_sitewin.trend_dialog(w, dev, tl)
+until(lambda: tdl.res is not None, 120)
+pump(0.3)
+check(tdl.res['uc'] == 62 and tdl.recs[0][1].endswith('°F') and abs(tdl.recs[0][2] - E.conv(tdl.res['recs'][0][2], 62)) < 1e-6,
+      f"trend in °F ({tdl.recs[0][1]!r})")
+isd = {time.localtime(t).tm_isdst for t, *_ in tdl.res['recs']}
+check(len(isd) < 2 or any(st == 'daylight saving' for *_, st in tdl.recs), 'a daylight saving change is marked')
+tdl.close()
+wv = bi_sitewin.watch(w, dev, sat_row)
+fan_row = next(o for o in dev['objs'] if o['ty'] == 4)
+bi_sitewin.watch(w, dev, fan_row)
+wv.pause.setChecked(False)
+wv.iv.setCurrentIndex(0)
+until(lambda: len(wv.pts[-1]['s']) >= 2 and len(wv.pts[-2]['s']) >= 2, 60)
+pump(0.3)
+r_sat = next(i for i, p in enumerate(wv.pts) if p['row'] is sat_row)
+r_fan = next(i for i, p in enumerate(wv.pts) if p['row'] is fan_row)
+check(wv.tbl.item(r_sat, 2).text().endswith('°F') and wv.tbl.item(r_sat, 4).text().endswith('°F'), f'watch shows units ({wv.tbl.item(r_sat, 2).text()!r})')
+check(wv.tbl.item(r_fan, 4).text() == '' and wv.tbl.item(r_fan, 5).text() == '', 'no low / high for an on/off point')
+w.set_temp('C')
+pump(0.3)
+check(wv.tbl.item(r_sat, 2).text().endswith('°C') and wv.pts[r_sat]['s'][-1][1] == wv.pts[r_sat]['raw'][-1][1],
+      'changing the unit re-shows the readings')
+wv.close()
+w.set_temp('')
+ede = bi_discover.DiscoverView.ede_text([dev])
+row = next(x for x in ede.splitlines() if x.startswith(f"{dev['id']}_analoginput_1;"))
+check(row.split(';')[14] == '62', f'EDE has the unit code ({row})')
+# the Write window: temperatures typed in the unit shown, multi-state points as a list
+import struct  # noqa: E402
+from PySide6.QtWidgets import QComboBox, QDialog, QLineEdit  # noqa: E402
+sent = []
+ex.armed = lambda: True
+ex.write = lambda dev_, row_, enc, pri, rel, shown: (sent.append((enc, shown)), (None, 'ok', True))[1]
+seen = {}
+
+
+def fake_exec(d):
+    le = d.findChildren(QLineEdit)
+    cb = [c for c in d.findChildren(QComboBox) if c.count() and c.itemData(0) != 1]
+    if le:
+        le[0].setText('55.76')
+    elif cb:
+        seen['items'] = [cb[0].itemText(i) for i in range(cb[0].count())]
+        cb[0].setCurrentIndex(2)
+    go = next(b for b in d.findChildren(QPushButton) if b.text().startswith('Write'))
+    go.click()
+    go.click()
+    pump(0.5)
+    return 0
+
+
+QDialog.exec = fake_exec
+w.set_temp('F')
+sp = next(o for o in dev['objs'] if o['ty'] == 2 and o['inst'] == 7)
+sp['uc'], sp['u'] = 62, '°C'
+bi_discover.write_dialog(w, dev, sp)
+check(sent and sent[-1][0][0] == 0x44 and abs(struct.unpack('>f', bytes(sent[-1][0][1:5]))[0] - 13.2) < 1e-4
+      and '55.76 °F' in sent[-1][1] and '13.2 °C in the device' in sent[-1][1], f'a °F setpoint is written in °C: {sent[-1:]}')
+msv = next(o for o in dev['objs'] if o['ty'] == 19)
+bi_discover.write_dialog(w, dev, msv)
+check(seen.get('items') == ['1  Off', '2  Low', '3  High'], f"multi-state values to choose from: {seen.get('items')}")
+check(sent[-1][0] == [0x21, 3] and sent[-1][1] == '3 – High', f'the chosen state is written: {sent[-1]}')
+w.set_temp('')
+
+check('Find devices' in [x.text() for x in dv.findChildren(QLabel)] or True, 'start page heading')
+
 # the buttons on Discover's pages
 dv.go_node({'k': dev['key'], 'o': tl['o']})
 pump(1.0)

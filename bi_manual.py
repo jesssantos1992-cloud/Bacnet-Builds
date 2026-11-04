@@ -655,7 +655,7 @@ to end it early.</li>
 <h3>Writing a value</h3>
 <ol>
 <li>Open a commandable point (an output or value object) and press <b>Write…</b>.</li>
-<li>Enter the new value (or choose active / inactive for a binary point) and the <b>priority</b>. Priority 8 – manual
+<li>Enter the new value (or choose active / inactive for a binary point, or the state by name for a multi-state point) and the <b>priority</b>. Priority 8 – manual
 operator – is the usual one for technicians.</li>
 <li>Press <b>Write…</b>. The dialog shows exactly what will be sent; press <b>Confirm</b> to send it.</li>
 <li>The device's answer is shown, and the value is read back to check it took effect. If a higher priority is in
@@ -730,6 +730,11 @@ words: “sat sp” finds “SAT Setpoint”.</p>
 ch('settings', 'Appearance, tips and the tour', 'Everyday tools', f"""
 <h3>Light and dark</h3>
 <p>View &gt; Theme: <b>automatic</b> follows Windows, or choose <b>light</b> or <b>dark</b>.</p>
+<h3>Temperatures in °F or °C</h3>
+<p>View &gt; <b>Temperature</b>: show temperatures read from devices <b>as each device sends them</b>, always in
+<b>°F</b>, or always in <b>°C</b>. It applies in Discover (values, limits, the priority array), the live watch and trend
+logs. When you write a temperature, type it in the unit shown: it is converted to the device's own unit before it is
+sent, and the confirmation shows both. Captures and exports keep the device's own units.</p>
 <h3>Galactic cursor</h3>
 <p>Inside the app the mouse pointer is a small galaxy: a nebula-filled arrow with stars and a bright star at the tip
 (the tip is exactly where you click). Text boxes still show the normal text cursor and dividers their resize arrows.

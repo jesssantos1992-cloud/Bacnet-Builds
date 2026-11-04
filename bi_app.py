@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 
 import bacnet_live as BL
 import bi_core as C
+import bi_explore as E
 import bi_points
 import bi_ui as U
 from bi_common import (AUTHOR, BRAND, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
@@ -866,6 +867,7 @@ class MainWindow(QMainWindow):
         self.upd = None
         self.tray = None
         from bi_explore import Explorer
+        E.TEMP_PREF = store.get('bi_temp') or ''          # View > Temperature
         self.explorer = Explorer(BL.RELAY, store, notify=self._ex_notify)
         self._ex_pending = False
         self.views = {}
@@ -1163,6 +1165,14 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         for t, v in [('Theme: automatic', ''), ('Theme: light', 'light'), ('Theme: dark', 'dark')]:
             act(m, t, lambda _=False, v=v: self.set_theme(v))
+        m.addSeparator()
+        self.m_temp = {}
+        for t, v in [('Temperature: as the device sends it', ''), ('Temperature: °F', 'F'), ('Temperature: °C', 'C')]:
+            a = QAction(t, self, checkable=True)
+            a.triggered.connect(lambda _=False, v=v: self.set_temp(v))
+            m.addAction(a)
+            self.m_temp[v] = a
+        m.aboutToShow.connect(lambda: [a.setChecked(v == E.TEMP_PREF) for v, a in self.m_temp.items()])
         self.m_galaxy = QAction('Galactic cursor', self, checkable=True)
         self.m_galaxy.setChecked(self.store.get('bi_galaxy', True))
         self.m_galaxy.toggled.connect(self.set_galaxy)
@@ -2395,6 +2405,17 @@ class MainWindow(QMainWindow):
         U.set_galaxy_cursor(on)
         self.toast('Galactic cursor ' + ('on' if on else 'off'))
 
+    def set_temp(self, v):
+        """Show temperatures read from devices in °F, °C or as each device sends them."""
+        self.store.set('bi_temp', v)
+        E.TEMP_PREF = v
+        if 'x' in self.views:
+            self.views['x'].refresh()
+        w = getattr(self, '_watch', None)
+        if w is not None:
+            w.retemp()
+        self.toast('Temperatures: ' + {'F': '°F', 'C': '°C'}.get(v, 'as each device sends them'))
+
     def set_theme(self, v):
         self.store.set('bi_theme', v)
         apply_theme(v)
@@ -2441,7 +2462,6 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------- command palette --
     def command_palette(self, from_button=False):
         """Ctrl+K: jump to anything by typing."""
-        import bi_explore as E
         items = []
         keys = {'p': 'Ctrl+1', 'f': 'Ctrl+2', 'd': 'Ctrl+3', 'o': 'Ctrl+4', 'x': 'Ctrl+5', 'w': 'Ctrl+6', 't': 'Ctrl+7',
                 'm': 'Ctrl+8', 'g': 'Ctrl+9'}

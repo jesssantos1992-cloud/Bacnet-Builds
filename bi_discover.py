@@ -94,6 +94,7 @@ class DiscoverView(QWidget):
         ll.addLayout(qr)
         self.hide_cap = set()                  # capture tabs whose devices were cleared from this list
         self._live_busy = False
+        self._live_sig = None
         self.nrun = self.nres = None           # Discover this network: what is running, and the last result
         self.live_tbl = self.live_big = None   # what is on screen with a live value: (table, rows, device), (label, row, device)
         self._lt = QTimer(self, timeout=self.live_tick)
@@ -1027,8 +1028,10 @@ class DiscoverView(QWidget):
         if big and (not rows or big[1] not in rows):
             rows.append(big[1])
             e = e or big[2]
-        if not rows or not e or time.time() - e.get('live_at', 0) < self.LIVE_S[self.ex.mode]:
+        sig = repr(sorted((self.node or {}).items()))
+        if not rows or not e or (sig == self._live_sig and time.time() - e.get('live_at', 0) < self.LIVE_S[self.ex.mode]):
             return
+        self._live_sig = sig                              # a page just opened: read now, then every few seconds
         self._live_busy = True
         e['live_at'] = time.time()
         B = [rows[i:i + 8] for i in range(0, len(rows), 8)]
@@ -1049,7 +1052,6 @@ class DiscoverView(QWidget):
 
     def live_paint(self):
         self._live_busy = False
-        self.nrun = self.nres = None           # Discover this network: what is running, and the last result
         tbl, big = getattr(self, 'live_tbl', None), getattr(self, 'live_big', None)
         try:
             if tbl:
@@ -1070,7 +1072,7 @@ class DiscoverView(QWidget):
         cap = [d for d in AL if d['cap']]
         pk = self.pk
         run = pk and pk.get('run')
-        p.add(label('New discover', bold=True, size=17))
+        p.add(label('Find devices', bold=True, size=17))
         p.add(label('Choose where the devices come from, pick the ones you want, then press Discover to read their points into a tree.', muted=True))
         cards = QHBoxLayout()
         cards.setSpacing(12)
@@ -1378,7 +1380,7 @@ class DiscoverView(QWidget):
             er = label(pd['err'])
             er.setStyleSheet(f"color:{colors()['se']}")
             dv.addWidget(er)
-        g = (pd or {})
+        g = E.temp_pd(pd or {}, o)             # limits and priorities in the temperature unit chosen in View
 
         def ro(v):
             le = QLineEdit('' if v is None else str(v))
@@ -1853,7 +1855,7 @@ class DiscoverView(QWidget):
             for o in d.get('objs') or []:
                 key = f"{d['id']}_{E.sd_ty(o['ty'])}_{o['inst']}".replace(' ', '')
                 L.append(';'.join(cell(x) for x in [key, d['id'], o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}", o['ty'], o['inst'],
-                                                    o['desc'], '', '', '', '', '', '', '', '', '', '']))
+                                                    o['desc'], '', '', '', '', '', '', '', '', o.get('uc'), '']))
         return '\r\n'.join(L) + '\r\n'
 
     def save_ede(self, name, devs):
@@ -2020,16 +2022,25 @@ def write_dialog(win, dev, row):
     d.setWindowTitle(f'Write to {nm}')
     v = QVBoxLayout(d)
     v.addWidget(label(f"Device {dev['id']}" + (f" “{dev_name(dev.get('name'), dev['id'])}”" if dev_name(dev.get('name'), dev['id']) else '') + f' · {tn} · present-value', muted=True))
-    v.addWidget(label(f"Current value: {(str(row.get('val') or '').strip() or 'unknown')} {row.get('u') or ''}", bold=True))
+    v.addWidget(label(f"Current value: {E.value_text(row) or 'unknown'}", bold=True))
     f = QFormLayout()
+    states = row.get('states') if ms else None
+    tconv = E.temp_to(row.get('uc')) is not None
     if binary:
         val = QComboBox()
         val.addItem('active (on)', 'active')
         val.addItem('inactive (off)', 'inactive')
+    elif states:
+        val = QComboBox()
+        for i, s_ in enumerate(states):
+            val.addItem(f'{i + 1}  {s_}', str(i + 1))
+        cur = E.state_name(row)
+        if cur:
+            val.setCurrentIndex(states.index(cur))
     else:
         val = QLineEdit()
         val.setPlaceholderText('state number, e.g. 2' if ms else 'number, e.g. 21.5')
-    f.addRow('New value', val)
+    f.addRow(f'New value ({E.unit_of(row)})' if tconv else 'New value', val)
     pri = QComboBox()
     for i in range(1, 17):
         pri.addItem(f'{i}{PRI.get(i, "")}', i)
@@ -2053,7 +2064,17 @@ def write_dialog(win, dev, row):
     c = colors()
 
     def text():
-        return val.currentData() if binary else val.text().strip()
+        return val.currentData() if isinstance(val, QComboBox) else val.text().strip()
+
+    def device_text():
+        """What is sent: a temperature typed in the unit shown goes back to the device's own unit."""
+        t = text()
+        if not tconv:
+            return t
+        try:
+            return E.num_fmt(E.conv(float(t), row.get('uc'), back=True), 4)
+        except ValueError:
+            return t
 
     def click():
         p = pri.currentData()
@@ -2061,11 +2082,18 @@ def write_dialog(win, dev, row):
         if release:
             enc = [0]
         else:
-            enc = E.ex_enc(row['ty'], text())
+            enc = E.ex_enc(row['ty'], device_text())
             if not enc:
                 msg.setText(f'<span style="color:{c["se"]}">That is not a valid value for this kind of point.</span>')
                 return
-        shown = 'RELEASE (null)' if release else (text() if binary else f"{text()} {row.get('u') or ''}")
+        if release:
+            shown = 'RELEASE (null)'
+        elif binary:
+            shown = text()
+        elif states:
+            shown = f"{text()} – {states[int(text()) - 1]}"
+        else:
+            shown = f"{text()} {E.unit_of(row)}" + (f" ({device_text()} {row.get('u') or ''} in the device)" if tconv else '')
         if st['step'] == 0:
             st['step'] = 1
             go.setText(f"Confirm: {'release' if release else 'write ' + shown.strip()} at priority {p}")
