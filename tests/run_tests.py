@@ -55,6 +55,7 @@ def main():
              ('light, dark and automatic theme on screen', [py, 'theme_test.py'], False),
              ('navigation and Back', [py, 'nav_test.py'], False),
              ('problem log and Report a problem', [py, 'log_test.py'], False),
+             ('updates that fail: reasons, log, download page', [py, 'update_test.py'], False),
              ('galactic cursor', [py, 'cursor_test.py'], False),
              ('smoke: every view and export', [py, 'smoke.py'] + caps, True),
              ('QA: every view, both themes, two sizes', [py, 'qa.py'] + caps, True),

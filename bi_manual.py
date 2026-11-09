@@ -770,6 +770,12 @@ ticked). When one is available, a blue bar appears:</p>
 downloaded .zip and drag Wirescope into Applications, choosing Replace. (A Mac app can only update itself when it
 is signed with a paid Apple developer certificate.)</p>
 <p>Help &gt; <b>Check for updates…</b> checks straight away. Help &gt; <b>About</b> shows the version you have.</p>
+<h3>If an update fails</h3>
+<p>The message says why, for example the network blocks the download, a proxy wants a sign-in, or antivirus changed the
+file. Nothing is changed when an update fails. Press <b>Open download page</b>, download <i>Wirescope-Setup</i> and run
+it: your settings, names and notes are kept. If Wirescope was installed for all users, Windows asks for administrator
+permission while it updates; on a company laptop that may need IT. Every attempt is written to <i>update.log</i> in the
+log folder (Help &gt; Report a problem &gt; Open log folder), with the installer's own log next to it.</p>
 """)
 
 ch('keys', 'Keyboard shortcuts', 'Reference', f"""

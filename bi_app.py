@@ -2779,6 +2779,25 @@ class MainWindow(QMainWindow):
         d.resize(520, 200)
         d.exec()
 
+    def upd_failed(self, err):
+        """An update that did not work: say why, and offer the manual way (download page) and Report a problem."""
+        page = (self.upd or {}).get('page') or 'https://github.com/jesssantos1992-cloud/Bacnet-Builds/releases/latest'
+        b = QMessageBox(self)
+        b.setIcon(QMessageBox.Icon.Warning)
+        b.setWindowTitle('Update failed')
+        b.setText(f'{err}\n\nNothing was changed: you can keep using this version.\n\nTo update by hand, open the download page, '
+                  'download Wirescope-Setup and run it. Your settings are kept.')
+        dl = b.addButton('Open download page', QMessageBox.ButtonRole.AcceptRole)
+        rp = b.addButton('Report a problem…', QMessageBox.ButtonRole.ActionRole)
+        b.addButton(QMessageBox.StandardButton.Close)
+        b.exec()
+        if b.clickedButton() is dl:
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(page))
+        elif b.clickedButton() is rp:
+            self.report_problem()
+
     def upd_install(self):
         r = self.upd or {}
         if r.get('download') and not r.get('can_install'):            # Mac: the browser downloads it, the user swaps the app
@@ -2789,7 +2808,9 @@ class MainWindow(QMainWindow):
             return
         d = QMessageBox(self)
         d.setWindowTitle('Updating…')
-        d.setText('Downloading and checking the new version. The app will close and reopen by itself – this takes about a minute.')
+        d.setText('Downloading and checking the new version. The app will close and reopen by itself – this takes about a minute.'
+                  + ('\n\nWirescope is installed for all users, so Windows will ask for administrator permission: '
+                     'press Yes when it does.' if r.get('needs_admin') else ''))
         d.setStandardButtons(QMessageBox.StandardButton.NoButton)
         d.show()
 
@@ -2799,8 +2820,7 @@ class MainWindow(QMainWindow):
             def done():
                 d.hide()
                 if r and r.get('ok') is False:
-                    QMessageBox.warning(self, 'Update failed', f"{r.get('error') or 'Something went wrong.'}\n\n"
-                                        'Nothing was changed. You can keep using this version.')
+                    self.upd_failed(r.get('error') or 'Something went wrong.')
                 elif r and r.get('ok'):
                     self.store.flush()
                     self.save_session()

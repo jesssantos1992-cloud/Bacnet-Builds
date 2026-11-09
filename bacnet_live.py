@@ -70,15 +70,55 @@ def update_manifest():
     try:
         m = json.loads(_fetch(UPDATE_URL, 200_000).decode("utf-8"))
     except Exception as ex:                                   # offline, 404, bad JSON ...
-        return None, "Could not reach the update server (%s)." % (str(ex)[:80] or type(ex).__name__)
+        return None, "Could not reach the update server: %s." % _why_fetch(ex)
     if not isinstance(m, dict) or not m.get("version"):
         return None, "The update file is not valid."
     return m, ""
 
 
+def _upd_log(msg):
+    """Every update attempt goes in logs/update.log, so a failure on someone's laptop can be explained later."""
+    try:
+        d = os.path.join(state_dir(), "logs")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "update.log"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + f"  {APP_VERSION}  {msg}\n")
+    except OSError:
+        pass
+
+
+def _why_fetch(ex):
+    """A download error in words, with the likely cause."""
+    import urllib.error
+    t = str(ex)
+    if isinstance(ex, urllib.error.HTTPError) and ex.code == 407:
+        return "the network's proxy server wants a sign-in, which the app cannot give"
+    if "CERTIFICATE_VERIFY_FAILED" in t or "certificate" in t.lower():
+        return "a security product on this network inspects secure connections and the app does not trust it"
+    if isinstance(ex, TimeoutError) or "timed out" in t.lower():
+        return "the connection timed out"
+    if "getaddrinfo" in t or "Name or service" in t or "11001" in t:
+        return "this PC is not connected to the internet (or GitHub is blocked)"
+    return (t[:120] or type(ex).__name__)
+
+
+def install_dir_writable():
+    """Can this account change the installed app? If not (installed for all users), Windows asks for an administrator."""
+    d = os.path.dirname(sys.executable)
+    try:
+        p = os.path.join(d, ".write-test-%d" % os.getpid())
+        with open(p, "w") as f:
+            f.write("x")
+        os.remove(p)
+        return True
+    except OSError:
+        return False
+
+
 def update_check():
     m, err = update_manifest()
     out = {"current": APP_VERSION, "configured": bool(UPDATE_URL), "can_install": bool(getattr(sys, "frozen", False)) and sys.platform == "win32"}
+    out["needs_admin"] = out["can_install"] and not install_dir_writable()
     if err:
         out.update(ok=False, error=err)
         return out
@@ -92,7 +132,17 @@ def update_check():
 
 
 def update_install():
-    """Download the installer named in the manifest, check its SHA-256, run it silently, then quit."""
+    """Download the installer named in the manifest, check its SHA-256, run it silently, then quit.
+    Every attempt and its result is written to logs/update.log; the installer writes its own log there too."""
+    try:
+        r = _update_install()
+    except Exception as ex:                                   # anything unexpected: say so instead of failing silently
+        r = {"ok": False, "error": "Something unexpected went wrong (%s: %s)." % (type(ex).__name__, str(ex)[:150])}
+    _upd_log("update: " + ("started the installer" if r.get("ok") else "FAILED – " + str(r.get("error"))))
+    return r
+
+
+def _update_install():
     import hashlib
     import tempfile
     if not getattr(sys, "frozen", False) or sys.platform != "win32":
@@ -111,16 +161,23 @@ def update_install():
         try:
             data = _fetch(url, 400_000_000)
         except Exception as ex:
-            return {"ok": False, "error": "Download failed (%s)." % (str(ex)[:80] or type(ex).__name__)}
+            return {"ok": False, "error": "The download failed: %s." % _why_fetch(ex)}
         if hashlib.sha256(data).hexdigest() != want:
-            return {"ok": False, "error": "The download did not match its checksum, so it was not installed."}
+            return {"ok": False, "error": "The download did not match its checksum, so it was not installed. Something on the "
+                                         "way (antivirus or a web filter) changed or cut the file (%d bytes arrived)." % len(data)}
         d = tempfile.mkdtemp(prefix="bacnet-inspector-update-")
         path = os.path.join(d, "Wirescope-Setup-%s.exe" % re.sub(r"[^0-9A-Za-z.]", "", str(m["version"])))
         with open(path, "wb") as f:
             f.write(data)
         flags = 0x00000008 | 0x00000200                       # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen([path, "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/NOCANCEL"],
-                         creationflags=flags, close_fds=True)
+        logs = os.path.join(state_dir(), "logs")
+        os.makedirs(logs, exist_ok=True)
+        setup_log = os.path.join(logs, "setup-%s.log" % re.sub(r"[^0-9A-Za-z.]", "", str(m["version"])))
+        try:
+            subprocess.Popen([path, "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/NOCANCEL",
+                              "/LOG=" + setup_log], creationflags=flags, close_fds=True)
+        except OSError as ex:
+            return {"ok": False, "error": "Windows did not let the installer start (%s). Antivirus may have blocked it." % ex}
         threading.Timer(1.5, lambda: os._exit(0)).start()     # let the installer take over
         return {"ok": True}
     finally:

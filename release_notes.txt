@@ -1,1 +1,2 @@
 - Discover: choose the network adapter for BACnet/IP. Automatic uses a connected Ethernet cable first, then Wi-Fi, so a laptop on both no longer sends its Who-Is out of the wrong one. Broadcasts go to the adapter's real subnet.
+- Updates: when an update fails, the message says why (proxy, blocked download, antivirus, administrator needed) and offers the download page. Every attempt is logged.
