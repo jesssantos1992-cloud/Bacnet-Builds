@@ -1,14 +1,1 @@
-- Every start is fresh: Discover starts with an empty device list and last time's capture tabs are not reopened.
-- Discover: a Clear list button empties the device list (Undo brings it back).
-- Discover: click a network on the left to see its devices, and press Discover this network to find and read just that network again. The New discover button at the top is gone.
-- Discover: point values on a category page (Analog Inputs, Binary Outputs and so on) and in the point panel now update by themselves every few seconds, so they always show the real value. Refresh values and Read now are gone.
-- The sidebar shows the Wirescope icon and name (ACCS stays in Help > About, the manual and reports).
-- Fixed: in light mode the capture tab names could be invisible after switching theme.
-- Discover: multi-state points show what each state means (from the device's state text), and the value shows its state, for example 2 – Low.
-- View > Temperature: show temperatures in °F, °C or as each device sends them. Writes are converted back to the device's unit.
-- Writing a multi-state point: pick the state by name from a list.
-- Values on a Discover page are read as soon as it opens.
-- Live watch shows units, and no low / high for on/off points.
-- Trend logs mark where the clocks changed for daylight saving; EDE files include the unit code.
-- Consistency: every page is titled with its name in the sidebar, the same actions have the same names in menus and on pages, buttons that open a window end in "…", counts use thousands separators, and times read "12.3 s" everywhere.
-- The View menu lists Point history and Alarms & events; the point panel uses plain sentence-case labels; Discover says Manufacturer like the rest of the app.
+- Discover: choose the network adapter for BACnet/IP. Automatic uses a connected Ethernet cable first, then Wi-Fi, so a laptop on both no longer sends its Who-Is out of the wrong one. Broadcasts go to the adapter's real subnet.

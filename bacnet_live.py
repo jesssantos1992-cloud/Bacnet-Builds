@@ -529,6 +529,114 @@ def local_ips():
     return sorted(i for i in ips if not i.startswith("127."))
 
 
+# ----------------------------------------------------------- adapters --
+_VIRTUAL = re.compile(r"virtual|hyper-v|vethernet|vmware|virtualbox|vpn|tap-|tap |wintun|wireguard|tailscale|zerotier|"
+                      r"loopback|bluetooth|npcap|docker|wsl|teredo|isatap|fortinet|cisco anyconnect|globalprotect", re.I)
+
+
+def _win_adapters():
+    """Windows: every adapter with an IPv4 address, from GetAdaptersAddresses (no console window, no admin)."""
+    import ctypes
+    from ctypes import wintypes as W
+
+    class SOCKET_ADDRESS(ctypes.Structure):
+        _fields_ = [("lpSockaddr", ctypes.c_void_p), ("iSockaddrLength", ctypes.c_int)]
+
+    class UNICAST(ctypes.Structure):
+        pass
+    UNICAST._fields_ = [("Length", W.ULONG), ("Flags", W.DWORD), ("Next", ctypes.POINTER(UNICAST)),
+                        ("Address", SOCKET_ADDRESS), ("PrefixOrigin", ctypes.c_int), ("SuffixOrigin", ctypes.c_int),
+                        ("DadState", ctypes.c_int), ("ValidLifetime", W.ULONG), ("PreferredLifetime", W.ULONG),
+                        ("LeaseLifetime", W.ULONG), ("OnLinkPrefixLength", ctypes.c_uint8)]
+
+    class GATEWAY(ctypes.Structure):
+        pass
+    GATEWAY._fields_ = [("Length", W.ULONG), ("Reserved", W.DWORD), ("Next", ctypes.POINTER(GATEWAY)),
+                        ("Address", SOCKET_ADDRESS)]
+
+    class ADAPTER(ctypes.Structure):
+        pass
+    ADAPTER._fields_ = [("Length", W.ULONG), ("IfIndex", W.DWORD), ("Next", ctypes.POINTER(ADAPTER)),
+                        ("AdapterName", ctypes.c_char_p), ("FirstUnicastAddress", ctypes.POINTER(UNICAST)),
+                        ("FirstAnycastAddress", ctypes.c_void_p), ("FirstMulticastAddress", ctypes.c_void_p),
+                        ("FirstDnsServerAddress", ctypes.c_void_p), ("DnsSuffix", ctypes.c_wchar_p),
+                        ("Description", ctypes.c_wchar_p), ("FriendlyName", ctypes.c_wchar_p),
+                        ("PhysicalAddress", ctypes.c_ubyte * 8), ("PhysicalAddressLength", W.ULONG),
+                        ("Flags", W.ULONG), ("Mtu", W.ULONG), ("IfType", W.ULONG), ("OperStatus", ctypes.c_int),
+                        ("Ipv6IfIndex", W.DWORD), ("ZoneIndices", W.ULONG * 16), ("FirstPrefix", ctypes.c_void_p),
+                        ("TransmitLinkSpeed", ctypes.c_uint64), ("ReceiveLinkSpeed", ctypes.c_uint64),
+                        ("FirstWinsServerAddress", ctypes.c_void_p), ("FirstGatewayAddress", ctypes.POINTER(GATEWAY)),
+                        ("Ipv4Metric", W.ULONG), ("Ipv6Metric", W.ULONG)]
+
+    fn = ctypes.windll.iphlpapi.GetAdaptersAddresses
+    flags = 0x0002 | 0x0004 | 0x0008 | 0x0080            # skip anycast / multicast / DNS, include gateways
+    size = W.ULONG(16384)
+    for _ in range(4):
+        buf = ctypes.create_string_buffer(size.value)
+        rc = fn(2, flags, None, buf, ctypes.byref(size))  # 2 = AF_INET
+        if rc != 111:                                     # 111 = buffer too small: try again with the size asked for
+            break
+    if rc != 0:
+        return []
+
+    def ipv4(sa):
+        if not sa.lpSockaddr:
+            return ""
+        raw = ctypes.string_at(sa.lpSockaddr, 8)
+        return ".".join(str(b) for b in raw[4:8]) if raw[0] == 2 else ""
+    out = []
+    p = ctypes.cast(buf, ctypes.POINTER(ADAPTER))
+    while p:
+        a = p.contents
+        gw = ipv4(a.FirstGatewayAddress.contents.Address) if a.FirstGatewayAddress else ""
+        u = a.FirstUnicastAddress
+        while u:
+            ip = ipv4(u.contents.Address)
+            if ip:
+                out.append({"id": (a.AdapterName or b"").decode(errors="replace"), "name": a.FriendlyName or "",
+                            "desc": a.Description or "", "iftype": a.IfType, "up": a.OperStatus == 1, "ip": ip,
+                            "prefix": u.contents.OnLinkPrefixLength, "gw": gw, "metric": a.Ipv4Metric})
+            u = u.contents.Next
+        p = a.Next
+    return out
+
+
+def adapters():
+    """The PC's IPv4 network adapters, the best one for BACnet/IP first: wired Ethernet that is connected, then Wi-Fi,
+    then anything else; virtual adapters (Hyper-V, VPNs, VirtualBox ...) last. Each has 'kind' (Ethernet / Wi-Fi /
+    Virtual / Other), 'ip', 'prefix', 'bcast' (its subnet's broadcast address) and 'subnet' ('192.168.1.0/24')."""
+    raw = []
+    if os.name == "nt":
+        try:
+            raw = _win_adapters()
+        except Exception:                                 # never let a missing API stop the app
+            raw = []
+    if not raw:                                           # other systems, or the API failed: the addresses we can see
+        raw = [{"id": ip, "name": ip, "desc": "", "iftype": 6, "up": True, "ip": ip, "prefix": 24, "gw": "", "metric": 0}
+               for ip in local_ips()]
+    out = []
+    for a in raw:
+        if a["ip"].startswith("127.") or not a["up"]:
+            continue
+        virtual = bool(_VIRTUAL.search(a["name"] + " " + a["desc"])) or a["iftype"] in (24, 53, 131)
+        kind = "Virtual" if virtual else "Ethernet" if a["iftype"] == 6 else "Wi-Fi" if a["iftype"] == 71 else "Other"
+        try:
+            net = ipaddress.IPv4Network(f"{a['ip']}/{a['prefix'] or 24}", strict=False)
+        except ValueError:
+            continue
+        out.append({**a, "kind": kind, "apipa": a["ip"].startswith("169.254."),
+                    "bcast": str(net.broadcast_address), "subnet": str(net)})
+    rank = {"Ethernet": 0, "Wi-Fi": 1, "Other": 2, "Virtual": 3}
+    out.sort(key=lambda a: (rank[a["kind"]], a["apipa"], a["metric"] or 9999, a["name"]))
+    return out
+
+
+def pick_adapter(choice, ads=None):
+    """The adapter to use: the one chosen (by its id), or, for "" (Automatic) or one no longer connected, the best."""
+    ads = adapters() if ads is None else ads
+    return next((a for a in ads if choice and a["id"] == choice), None) or (ads[0] if ads else None)
+
+
 def send_bacnet(kind, src, dst):
     """Returns "" on success or a plain-English error."""
     pkt = PKTS.get(kind)
@@ -700,6 +808,21 @@ class Relay:
         self.cv = threading.Condition()
         self.port = 0
         self.armed_until = 0.0
+        self.iface = None                        # the adapter Discover uses (bacnet_live.adapters()), None = all
+
+    def set_iface(self, ad):
+        """Use one network adapter: the socket is bound to its address, so Who-Is goes out (and answers come back)
+        on that adapter only, even when Wi-Fi and Ethernet are both connected."""
+        key = (ad or {}).get("ip"), (ad or {}).get("prefix")
+        if key == ((self.iface or {}).get("ip"), (self.iface or {}).get("prefix")):
+            return
+        self.iface = ad
+        s, self.sock = self.sock, None
+        if s:
+            try:
+                s.close()                            # the receive thread ends; open() starts a new one
+            except OSError:
+                pass
 
     def arm(self, minutes):
         self.armed_until = time.time() + max(0, min(60, float(minutes))) * 60 if minutes else 0.0
@@ -714,19 +837,20 @@ class Relay:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        host = (self.iface or {}).get("ip") or "0.0.0.0"
         try:
-            s.bind(("0.0.0.0", 47808))                   # many devices answer to port 47808
+            s.bind((host, 47808))                        # many devices answer to port 47808
         except OSError:
-            s.bind(("0.0.0.0", 0))                       # another program owns it: unicast replies still work
+            s.bind((host, 0))                            # another program owns it: unicast replies still work
         self.port = s.getsockname()[1]
         self.sock = s
-        threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._loop, args=(s,), daemon=True).start()
 
-    def _loop(self):
+    def _loop(self, sock):
         own = set(local_ips())
         while True:
             try:
-                data, addr = self.sock.recvfrom(2048)
+                data, addr = sock.recvfrom(2048)
             except OSError:
                 return
             if addr[0] in own and addr[1] == self.port and data[:2] == b"\x81\x0b":
@@ -746,7 +870,7 @@ class Relay:
         self.open()
         targets = []
         if dest == "broadcast":
-            targets = ["255.255.255.255"] + sorted({".".join(ip.split(".")[:3] + ["255"]) for ip in local_ips()})
+            targets = self.broadcasts()
         else:
             host = dest.rsplit(":", 1)[0]
             targets = [host]
@@ -772,6 +896,12 @@ class Relay:
             except OSError:
                 pass
         return err
+
+    def broadcasts(self):
+        """Where a broadcast goes: everyone on the chosen adapter's subnet (its real mask, not a guessed /24)."""
+        if self.iface:
+            return ["255.255.255.255", self.iface["bcast"]]
+        return ["255.255.255.255"] + sorted({a["bcast"] for a in adapters() if not a["apipa"]})
 
     def recv(self, since, wait):
         end = time.time() + wait

@@ -251,6 +251,25 @@ class DiscoverView(QWidget):
         v.addWidget(self.ms)
         self.ms_status = label('', muted=True)
         v.addWidget(self.ms_status)
+        # BACnet/IP: which network adapter (Ethernet first; Wi-Fi only when no cable is connected)
+        self.ipw = QWidget()
+        il = QHBoxLayout(self.ipw)
+        il.setContentsMargins(0, 0, 0, 0)
+        il.setSpacing(8)
+        il.addWidget(QLabel('Network adapter'))
+        self.ip_nic = QComboBox()
+        self.ip_nic.setMinimumWidth(460)
+        self.ip_nic.setToolTip('The network card Discover sends and listens on. Automatic picks a connected Ethernet '
+                               'cable first, then Wi-Fi.')
+        il.addWidget(self.ip_nic)
+        nrf = U.tool(QToolButton(), 'refresh', tip='Look at the network adapters again (after plugging in a cable)')
+        il.addWidget(nrf)
+        il.addStretch(1)
+        v.addWidget(self.ipw)
+        self.ip_status = label('', muted=True)
+        v.addWidget(self.ip_status)
+        self.ip_nic.currentIndexChanged.connect(self.nic_picked)
+        nrf.clicked.connect(lambda: self.fill_nics(True))
         self.m_ip.toggled.connect(lambda on: on and self.set_mode('ip'))
         self.m_ms.toggled.connect(lambda on: on and self.set_mode('mstp'))
         rf.clicked.connect(self.fill_ports)
@@ -258,9 +277,60 @@ class DiscoverView(QWidget):
         self.ms_find.clicked.connect(self.ms_find_mac)
         self.ms_join.clicked.connect(self.ms_join_leave)
         self.fill_ports()
+        self.fill_nics()
         self.ms.setVisible(self.ex.mode == 'mstp')
         self.ms_status.setVisible(self.ex.mode == 'mstp')
+        self.ipw.setVisible(self.ex.mode != 'mstp')
+        self.ip_status.setVisible(self.ex.mode != 'mstp')
         return w
+
+    # ------------------------------------------------------ network adapter --
+    def fill_nics(self, told=False):
+        """List the connected network adapters (best first) and use the chosen one, or the best for Automatic."""
+        import bacnet_live as BL
+        self.nics = BL.adapters()
+        choice = self.win.store.get('bi_nic') or ''
+        best = self.nics[0] if self.nics else None
+        self.ip_nic.blockSignals(True)
+        self.ip_nic.clear()
+        self.ip_nic.addItem('Automatic – ' + (self.nic_text(best) if best else 'no connected adapter'), '')
+        for a in self.nics:
+            self.ip_nic.addItem(self.nic_text(a), a['id'])
+        i = self.ip_nic.findData(choice)
+        self.ip_nic.setCurrentIndex(max(0, i))
+        self.ip_nic.blockSignals(False)
+        self.apply_nic()
+        if told:
+            self.win.toast(self.ip_status.text().split(' · ')[0] if self.nics else 'No connected network adapter found')
+
+    @staticmethod
+    def nic_text(a):
+        return f"{a['kind']} – {a['name']} – {a['ip']}  (subnet {a['subnet']})"
+
+    def nic_picked(self, _i=None):
+        self.win.store.set('bi_nic', self.ip_nic.currentData() or '')
+        self.apply_nic()
+
+    def apply_nic(self):
+        """Bind Discover to the adapter, and say which one it is (and what else is connected)."""
+        import bacnet_live as BL
+        choice = self.ip_nic.currentData() or ''
+        ad = BL.pick_adapter(choice, self.nics)
+        if hasattr(self.ex.relay, 'set_iface'):          # (a test relay may not have one)
+            self.ex.relay.set_iface(ad)
+        if not ad:
+            self.ip_status.setText('No connected network adapter. Plug in the Ethernet cable (or join Wi-Fi), then press ↻.')
+            return
+        t = f"Discover uses {ad['kind']} “{ad['name']}” · {ad['ip']} · subnet {ad['subnet']}"
+        if choice and ad['id'] != choice:
+            t = 'The adapter you chose is not connected. ' + t
+        others = [a for a in self.nics if a is not ad and a['kind'] in ('Ethernet', 'Wi-Fi')]
+        if others:
+            t += ' · also connected, not used: ' + ', '.join(f"{a['kind']} “{a['name']}”" for a in others)
+        if ad['apipa']:
+            t += (' · This adapter has no address from the network (169.254…): give it a static IP on the BACnet '
+                  'subnet, or check the cable.')
+        self.ip_status.setText(t)
 
     def fill_ports(self):
         cur = self.ms_port.currentData() or (self.win.store.get('bi_mstp') or {}).get('port')
@@ -283,6 +353,10 @@ class DiscoverView(QWidget):
         self.win.store.set('bi_dmode', m)
         self.ms.setVisible(m == 'mstp')
         self.ms_status.setVisible(m == 'mstp')
+        self.ipw.setVisible(m != 'mstp')
+        self.ip_status.setVisible(m != 'mstp')
+        if m != 'mstp':
+            self.fill_nics()
         self.node = None
         self.pk = None
         self.refresh()
@@ -971,6 +1045,8 @@ class DiscoverView(QWidget):
             return self.win.toast('Wait for Discover to finish, or press Stop first')
         if self.ex.mode == 'mstp' and not (self.ex.link and self.ex.link.on and self.ex.link.joined):
             return self._ms_msg('Join the MS/TP trunk first (choose the port, press Find a free MAC, then Join trunk).', True)
+        if self.ex.mode != 'mstp':
+            self.fill_nics()
         self.live = True
         run = self.nrun = {'k': k, 'msg': 'Sending a Who-Is…', 'stop': False}
         self.refresh()
@@ -1590,6 +1666,8 @@ class DiscoverView(QWidget):
                          if not (ex.link and ex.link.on) else
                          'Still waiting to be invited into the token ring – the scan can start once the PC has the token.', True)
             return
+        if ex.mode != 'mstp':
+            self.fill_nics()
         self.live = True
         self.pk = None
         ex.run(ex.scan, lambda n: self.win.on_ui(lambda: n and self.win.labels_changed()))

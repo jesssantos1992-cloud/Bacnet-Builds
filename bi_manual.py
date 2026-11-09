@@ -502,6 +502,13 @@ ch('discover', 'Discover: finding devices', 'Discover', f"""
 <p>Click a <b>network</b> on the left to see its devices and whether each answered. <b>Discover this network</b>
 sends a Who-Is to that network only and reads the details and points of every device that answers, so one network can
 be checked again without scanning the whole site.</p>
+<h3>Which network adapter</h3>
+<p>Under <b>Connection</b>, BACnet/IP has a <b>Network adapter</b> list. <b>Automatic</b> uses a connected Ethernet
+cable first, then Wi-Fi; virtual adapters (Hyper-V, VPNs, VirtualBox) come last. Discover sends and listens on that
+adapter only, so a laptop on Wi-Fi and Ethernet at the same time no longer sends its Who-Is out of the wrong one, and
+broadcasts go to that adapter's real subnet. The line under the list says which adapter is used and what else is
+connected. After plugging in a cable press ↻ (a scan also looks again). An address starting 169.254 means the adapter
+got no address from the network: give it a static IP on the BACnet subnet.</p>
 <p>Discover starts with an empty list every time the app opens, and the capture tabs from last time are not reopened.
 <b>Clear list</b> (next to the search box) empties the list: the discovered devices are forgotten and the open capture's
 devices are hidden here (the capture itself stays open). Press <b>Undo</b> on the message to bring them back.</p>
