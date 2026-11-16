@@ -12,7 +12,7 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSplitter,
-                               QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QStackedWidget, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_core as C
 import bi_explore as E
@@ -21,6 +21,30 @@ from bi_common import (Page, Pill, RowDelegate, Table, colors, csv_text, dev_nam
                        semibold, stamp)
 
 K_ROLE = Qt.ItemDataRole.UserRole
+OOS_T = {0, 1, 2, 3, 4, 5, 13, 14, 19, 17}      # objects with an out-of-service switch worth offering
+PRI_NAME = {1: 'Manual life safety', 2: 'Automatic life safety', 5: 'Critical equipment', 6: 'Minimum on / off',
+            8: 'Manual operator', 16: 'Lowest (schedules, programs)'}
+
+
+def confirm(win, title, html_text, ok_text):
+    """Ask before changing a device: the action button is red, Cancel is the default."""
+    d = QDialog(win)
+    d.setWindowTitle(title)
+    v = QVBoxLayout(d)
+    t = QLabel(html_text)
+    t.setTextFormat(Qt.TextFormat.RichText)
+    t.setWordWrap(True)
+    v.addWidget(t)
+    bb = QDialogButtonBox()
+    go = bb.addButton(ok_text, QDialogButtonBox.ButtonRole.AcceptRole)
+    go.setStyleSheet('QPushButton{background:#c42b1c;color:white;padding:4px 14px}')
+    cancel = bb.addButton(QDialogButtonBox.StandardButton.Cancel)
+    cancel.setDefault(True)
+    bb.accepted.connect(d.accept)
+    bb.rejected.connect(d.reject)
+    v.addWidget(bb)
+    d.resize(480, 180)
+    return d.exec() == QDialog.DialogCode.Accepted
 
 
 def ago(t):
@@ -58,6 +82,12 @@ class DiscoverView(QWidget):
         t.addWidget(label('Discover', bold=True, size=17, wrap=False))
         t.addWidget(label('Find devices and read their points', muted=True, wrap=False))
         bl.addLayout(t)
+        bl.addSpacing(12)
+        self.t_dev = QToolButton(text='Devices')
+        self.t_hist = QToolButton(text='History')
+        self.t_hist.setToolTip('The last discovers, kept on this computer: look back, reopen one or compare')
+        bl.addWidget(U.Segmented([self.t_dev, self.t_hist], 84))
+        self.t_dev.setChecked(True)                    # after Segmented has made the buttons checkable
         self.armpill = Pill('WRITE ACCESS ON', 'SERIOUS')
         bl.addWidget(self.armpill)
         bl.addStretch(1)
@@ -65,15 +95,24 @@ class DiscoverView(QWidget):
         self.b_opts = QPushButton('Options…')
         self.b_inv = QPushButton('Site inventory…')
         self.b_inv.setToolTip('Read the details and object list of every device, then save an Excel inventory with point counts')
+        self.b_find = QPushButton('Find point…')
+        self.b_find.setToolTip('Ask every device which one has a point, by its name (Who-Has)')
         self.b_arm = QPushButton('Enable write access…')
-        self.b_arm.setToolTip('Allow Write Property for a limited time')
-        for b in (self.b_scan, self.b_opts, self.b_inv, self.b_arm):
+        self.b_arm.setToolTip('Allow writes, restarts and clock changes for a limited time')
+        for b in (self.b_scan, self.b_find, self.b_opts, self.b_inv, self.b_arm):
             bl.addWidget(b)
         v.addWidget(bar)
-        v.addWidget(self._conn_bar())
+        self.stack = QStackedWidget()                  # Devices (the discover itself) or History
+        v.addWidget(self.stack, 1)
+        devw = QWidget()
+        dvl = QVBoxLayout(devw)
+        dvl.setContentsMargins(0, 0, 0, 0)
+        dvl.setSpacing(0)
+        self.stack.addWidget(devw)
+        dvl.addWidget(self._conn_bar())
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        v.addWidget(line)
+        dvl.addWidget(line)
         self.split = QSplitter(Qt.Orientation.Horizontal)
         left = QWidget()
         ll = QVBoxLayout(left)
@@ -184,9 +223,13 @@ class DiscoverView(QWidget):
         self.b_home.clicked.connect(self.home)
         self.split.setSizes([320, 900])
         self.split.setStretchFactor(1, 1)
-        v.addWidget(self.split, 1)
+        dvl.addWidget(self.split, 1)
+        self.history = None                            # bi_histwin.HistoryPage, made the first time History is opened
+        self.t_dev.toggled.connect(lambda on: on and self.show_tab('dev'))
+        self.t_hist.toggled.connect(lambda on: on and self.show_tab('hist'))
         self.b_scan.clicked.connect(lambda: self.scan())
         self.b_opts.clicked.connect(self.options)
+        self.b_find.clicked.connect(lambda: __import__('bi_sitewin').who_has_dialog(win))
         self.b_inv.clicked.connect(self.inventory)
         self.b_arm.clicked.connect(lambda: win.disarm() if self.ex.armed() else win.arm_dlg())
         self.q.textChanged.connect(self._search)
@@ -647,6 +690,7 @@ class DiscoverView(QWidget):
             al = e.get('alarms')
             devs.append((d['key'], d['name'], d['vendor'], d['model'], d['ip'], d['net'], bool(d['cap']), e.get('st'),
                          e.get('old'), e.get('pm'), e.get('stale'), e.get('stl'), len(objs), sum(1 for o in objs if o.get('ok')),
+                         sum(1 for o in objs if 'states' in o),
                          hash(tuple(o['name'] for o in objs)), al and al.get('at'), e.get('alarms_busy')))
         n = self.node or {}
         row = None
@@ -655,11 +699,12 @@ class DiscoverView(QWidget):
             o = next((x for x in ((en or {}).get('ex') or {}).get('objs') or [] if x['o'] == n['o']), None)
             if o:
                 row = (o.get('name'), o.get('desc'), bool(o.get('pd')), o.get('pdl'), o.get('pl') is not None, o.get('pll'),
-                       tuple(o.get('states') or ()), 'states' in o, o.get('uc'))
+                       tuple(o.get('states') or ()), 'states' in o, o.get('uc'),
+                       repr({k: (o.get('pd') or {}).get(k) for k in ('oos', 'flags', 'pa', 'err')}))
         pk = self.pk and (self.pk.get('src'), tuple(sorted(self.pk['sel'])), repr(self.pk.get('run')))
         return repr((devs, sorted(n.items()), row, pk, self.tq, sorted(self.gopen), sorted(self.open), sorted(self.vis),
                      self.ex.mode, self.ex.busy, self.ex.armed(), self.ex.scan_at, repr(self.nrun), self.nres, self.live,
-                     is_dark(), E.TEMP_PREF, len(self.ex.wlog), json.dumps(self.win.store.labels(), sort_keys=True)))
+                     is_dark(), E.TEMP_PREF, E.PRESS_PREF, E.FLOW_PREF, len(self.ex.wlog), json.dumps(self.win.store.labels(), sort_keys=True)))
 
     def refresh(self, soft=False, force=False):
         self._stale = False
@@ -667,6 +712,8 @@ class DiscoverView(QWidget):
         self.armpill.setVisible(armed)
         self.b_arm.setText('Write access ON – turn off' if armed else 'Enable write access…')
         self.b_arm.setStyleSheet('QPushButton{background:#c42b1c;color:white}' if armed else '')
+        if self.history is not None and self.stack.currentWidget() is self.history:
+            self.history.maybe_reload()                # a discover was just saved
         AL = self.all_devs()
         D = [d for d in AL if d['ex'] or d['key'] in self.vis]
         ms = self.ex.mode == 'mstp'
@@ -1332,6 +1379,7 @@ class DiscoverView(QWidget):
             mx = QMenu(b3)
             mx.addAction('Excel or spreadsheet…', lambda: self.save_csv(f"device-{e['id']}-points.csv", self.csv_points(e)))
             mx.addAction('EDE file (for other BACnet tools)…', lambda: self.save_ede(f"device-{e['id']}-EDE.csv", [e]))
+            mx.addAction('Commissioning sheet (printable)…', lambda: self.save_cx([e]))
             b3.setMenu(mx)
             r.addWidget(b3)
         ba = QPushButton('Active alarms')
@@ -1345,6 +1393,20 @@ class DiscoverView(QWidget):
             bc.setToolTip('Compare the device clock with this PC')
             bc.clicked.connect(lambda: bi_sitewin.check_clock(self.win, e))
             r.addWidget(bc)
+            bs = QPushButton('Sync clock…')
+            bs.setToolTip('Set the device clock to this PC’s time (Time Synchronization; needs write access)')
+            bs.clicked.connect(lambda: bi_sitewin.sync_clocks_dialog(self.win, [e]))
+            r.addWidget(bs)
+            bd = QPushButton('Device commands')
+            md = QMenu(bd)
+            md.addAction('Restart (warm start)…', lambda: bi_sitewin.device_cmd_dialog(self.win, e, 'warm'))
+            md.addAction('Restart (cold start)…', lambda: bi_sitewin.device_cmd_dialog(self.win, e, 'cold'))
+            md.addSeparator()
+            md.addAction('Disable communication…', lambda: bi_sitewin.device_cmd_dialog(self.win, e, 'disable'))
+            md.addAction('Enable communication…', lambda: bi_sitewin.device_cmd_dialog(self.win, e, 'enable'))
+            bd.setMenu(md)
+            bd.setToolTip('Restart the device or switch its communication off and on (needs write access)')
+            r.addWidget(bd)
         r.addWidget(label((e or {}).get('pm') or '', muted=True, wrap=False))
         r.addStretch(1)
         ww = QWidget()
@@ -1412,7 +1474,7 @@ class DiscoverView(QWidget):
         ww.setLayout(r)
         p.add(ww)
         ms = ty in E.MS_T
-        t = Table(['#', 'Name', 'Value', 'Description', 'States' if ms else ''])
+        t = Table(['#', 'Name', 'Value', 'Description'] + (['States'] if ms else []))
         if ms and any('states' not in o for o in os_) and not e.get('stl'):
             e['stl'] = 1                                       # read what each state means, once per device
 
@@ -1421,10 +1483,11 @@ class DiscoverView(QWidget):
                     self.ex.read_states(e, rows)
                 finally:
                     e['stl'] = 0
+                    self.ex.notify()                   # after the flag is cleared, so the page is redrawn
             self.ex.run(load)
-        t.fill([[o['inst'], o['name'], (E.value_text(o), {'bold': True}), (o['desc'], {'fg': colors()['mu']}),
-                 ((E.states_text(o) if o.get('states') else 'reading the states…' if 'states' not in o else 'no state names',
-                   {'fg': colors()['mu']}) if ms else 'commandable – double-click to open' if o['ty'] in E.CMD_T else '')]
+        t.fill([[o['inst'], o['name'], (E.value_text(o), {'bold': True}), (o['desc'], {'fg': colors()['mu']})]
+                + ([(E.states_text(o) if o.get('states') else 'reading the states…' if 'states' not in o else 'no state names',
+                     {'fg': colors()['mu']})] if ms else [])
                 for o in os_],
                [{'k': e['key'], 'o': o['o']} for o in os_])
         t.rowActivated.connect(lambda n: n and self.go_node(n))
@@ -1473,11 +1536,10 @@ class DiscoverView(QWidget):
             sl = label('States: ' + E.states_text(o, 64), muted=True)
             sl.setToolTip('What each value of this multi-state point means (its state text)')
             sv.addWidget(sl)
-        flags = (pd or {}).get('flags')
-        if flags and flags != 'normal':
-            fl_ = label(f'⚠ {flags}', bold=True)
-            fl_.setStyleSheet(f"color:{colors()['se']}")
-            sv.addWidget(fl_)
+        if pd and pd.get('fb'):
+            sv.addWidget(self._flag_badges(pd['fb']))
+        if o['ty'] in OOS_T and pd and pd.get('oos') is not None:
+            sv.addLayout(self._oos_row(e, o, pd))
         f = QFormLayout()
         for k, v in (('Display name:', nm), ('Description:', o['desc'] or '')):
             le = QLineEdit(v)
@@ -1544,10 +1606,13 @@ class DiscoverView(QWidget):
         cb.clicked.connect(lambda: (QApplication.clipboard().setText(addr), self.win.toast('Address copied')))
         ar.addWidget(cb)
         f3.addRow('Address:', ar)
-        oos = QCheckBox()
-        oos.setEnabled(False)
-        oos.setChecked(bool(g.get('oos')))
-        f3.addRow('Out of service:', oos)
+        if o['ty'] in OOS_T and g.get('oos') is not None:
+            f3.addRow('Out of service:', self._oos_row(e, o, g, short=True))
+        else:
+            oos = QCheckBox()
+            oos.setEnabled(False)
+            oos.setChecked(bool(g.get('oos')))
+            f3.addRow('Out of service:', oos)
         f3.addRow('Reliability:', ro(g.get('rel') or '?'))
         f3.addRow('Profile name:', ro(g.get('prof') or '?'))
         tv_.addLayout(f3)
@@ -1589,17 +1654,9 @@ class DiscoverView(QWidget):
             dv.addLayout(f4)
             section('Priority array')
             if pa:
-                grid = QGridLayout()
-                for c in range(4):
-                    for i in range(4):
-                        k = c * 4 + i + 1
-                        v = pa[k - 1] if k - 1 < len(pa) else None
-                        grid.addWidget(label(f'{k}:', muted=True, wrap=False), i, c * 2, Qt.AlignmentFlag.AlignRight)
-                        grid.addWidget(label(v['s'] if v and v['a'] else '', bold=True, wrap=False), i, c * 2 + 1)
-                dv.addLayout(grid)
+                dv.addWidget(self._priority_table(e, o, pa, g.get('rd', '')))
             else:
                 dv.addWidget(label('?', muted=True))
-            dv.addWidget(label('To clear a priority level, use Write… and choose Release at that priority.', muted=True))
         tb = U.disclose(QToolButton(), 'Technical details')
         tb.setChecked(getattr(self, 'tech', False) or bool(o.get('pl')))
         tw.setVisible(tb.isChecked())
@@ -1630,8 +1687,13 @@ class DiscoverView(QWidget):
             r.addWidget(h)
         elif o['ty'] == 17:
             h = QPushButton('Show schedule…')
-            h.setToolTip('Read this schedule’s week and its holidays from the device')
+            h.setToolTip('Read this schedule’s week and its holidays from the device, and change them')
             h.clicked.connect(lambda: bi_sitewin.schedule_dialog(self.win, e, o))
+            r.addWidget(h)
+        elif o['ty'] == 6:
+            h = QPushButton('Show calendar…')
+            h.setToolTip('Read this calendar’s dates (holidays) from the device, and change them')
+            h.clicked.connect(lambda: bi_sitewin.calendar_dialog(self.win, e, o))
             r.addWidget(h)
         if o['ty'] not in (6, 8, 10, 11, 15, 20):
             lw = QPushButton('Watch live')
@@ -1645,6 +1707,115 @@ class DiscoverView(QWidget):
             r.addWidget(s)
         r.addStretch(1)
         return r
+
+    @staticmethod
+    def _flag_badges(bits):
+        """The four status flags as badges: lit (coloured) when set, grey when not. They wrap in a narrow panel."""
+        from bi_common import FlowLayout
+        w = QWidget()
+        r = FlowLayout(w, 6, 6)
+        for i, (name, sev) in enumerate((('In alarm', 'WARNING'), ('Fault', 'SERIOUS'), ('Overridden', 'WARNING'),
+                                         ('Out of service', 'WARNING'))):
+            on = i < len(bits) and bits[i] == '1'
+            p = Pill(('● ' if on else '') + name, sev if on else 'OFF')
+            p.setToolTip(f"Status flag “{name.lower()}” is {'SET' if on else 'clear'}")
+            r.addWidget(p)
+        return w
+
+    def _oos_row(self, e, o, pd, short=False):
+        """Out of service as one switch: shows the state and flips it (needs write access)."""
+        r = QHBoxLayout()
+        r.setSpacing(8)
+        on = bool(pd.get('oos'))
+        b = QPushButton('Put back in service' if on else 'Take out of service')
+        b.setToolTip('Write out-of-service to the device (asks for write access and confirms first). Out of service, '
+                     'an input stops following its sensor and its value can be written for testing.')
+        b.clicked.connect(lambda: self._toggle_oos(e, o, not on))
+        if not short:
+            st = Pill('OUT OF SERVICE' if on else 'In service', 'WARNING' if on else 'NOTE')
+            r.addWidget(st)
+        else:
+            r.addWidget(label('Yes' if on else 'No', bold=on, wrap=False))
+        r.addWidget(b)
+        r.addStretch(1)
+        return r
+
+    def _need_write(self):
+        """Write access on (asking for it if needed)? True when it is."""
+        if self.ex.armed():
+            return True
+        if not arm_dialog(self.win):
+            return False
+        self.win.wb_draw()
+        return True
+
+    def _toggle_oos(self, e, o, on):
+        nm = o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"
+        if not self._need_write():
+            return
+        txt = (f'Take <b>{esc(nm)}</b> out of service?<br><br>Its present value will stop following the field '
+               f"{'sensor' if o['ty'] in (0, 3, 13) else 'logic'} until you put it back. Anything that uses this point "
+               'keeps the last value, or the value you write.' if on else
+               f'Put <b>{esc(nm)}</b> back in service?<br><br>Its present value will follow the field again.')
+        if not confirm(self.win, 'Out of service', txt, 'Take out of service' if on else 'Put back in service'):
+            return
+
+        def work():
+            ok, msg = self.ex.set_oos(e, o, on)
+            self.win.on_ui(lambda: (self.win.toast(msg), self.refresh()))
+        self.ex.run(work)
+
+    def _priority_table(self, e, o, pa, rd):
+        """All 16 command priorities: the one in control highlighted, a Release button on every active level."""
+        c = colors()
+        f = QFrame()
+        f.setObjectName('pa')
+        f.setStyleSheet(U.surface_css('pa'))
+        g = QGridLayout(f)
+        g.setContentsMargins(14, 10, 14, 10)
+        g.setHorizontalSpacing(14)
+        g.setVerticalSpacing(2)
+        act = next((i for i, v in enumerate(pa) if v['a']), -1)
+        for i in range(16):                    # priority · value · Release · what it is for (cut off first when narrow)
+            v = pa[i] if i < len(pa) else {'a': False, 's': ''}
+            ctl = i == act
+            num = label(str(i + 1), bold=ctl, muted=not v['a'], wrap=False)
+            val = label(v['s'] if v['a'] else '—', bold=v['a'], muted=not v['a'], wrap=False)
+            nm = label('in control' if ctl else PRI_NAME.get(i + 1, ''), muted=not ctl, wrap=False)
+            nm.setToolTip(PRI_NAME.get(i + 1, ''))
+            if ctl:
+                for w in (num, val, nm):
+                    w.setStyleSheet(f"color:{c['ac']};font-weight:700")
+            g.addWidget(num, i, 0, Qt.AlignmentFlag.AlignRight)
+            g.addWidget(val, i, 1)
+            if v['a']:
+                b = QToolButton()
+                b.setText('Release')
+                b.setToolTip(f'Remove the command at priority {i + 1} (writes NULL; needs write access)')
+                b.clicked.connect(lambda _=False, p=i + 1, s=v['s']: self._release(e, o, p, s))
+                g.addWidget(b, i, 2)
+            g.addWidget(nm, i, 3)
+        rl = label('Relinquish default' + (f': {rd}' if rd else '') + ' – the value when no priority is active',
+                   muted=True, wrap=True)
+        g.addWidget(rl, 16, 0, 1, 4)
+        g.setColumnStretch(3, 1)
+        f.setMaximumWidth(620)
+        return f
+
+    def _release(self, e, o, p, shown):
+        nm = o['name'] or f"{E.sd_ty(o['ty'])} {o['inst']}"
+        if not self._need_write():
+            return
+        if not confirm(self.win, f'Release priority {p}',
+                       f'Release the command <b>{esc(shown)}</b> at priority <b>{p}</b> on <b>{esc(nm)}</b>?<br><br>'
+                       'The point then follows the next active priority, or its relinquish default.', 'Release'):
+            return
+
+        def work():
+            _e, msg, _ok = self.ex.write(e, o, [0], p, True, f'RELEASE (null) at {p}')
+            self.ex.read_detail(e, o)
+            self.win.on_ui(lambda: (self.win.toast(msg.split('. ')[0] + '.'), self.refresh()))
+        self.ex.run(work)
 
     def _load_point(self, e, o):
         self.ex.read_detail(e, o)
@@ -1681,6 +1852,23 @@ class DiscoverView(QWidget):
         p.add(t)
 
     # -------------------------------------------------------------- actions --
+    def show_tab(self, which):
+        """'dev' (the discover) or 'hist' (the History tab)."""
+        if which == 'hist':
+            if self.history is None:
+                import bi_histwin
+                self.history = bi_histwin.HistoryPage(self)
+                self.stack.addWidget(self.history)
+            self.history.reload()
+            self.stack.setCurrentWidget(self.history)
+            if not self.t_hist.isChecked():
+                self.t_hist.setChecked(True)
+        else:
+            self.stack.setCurrentIndex(0)
+            if not self.t_dev.isChecked():
+                self.t_dev.setChecked(True)
+            self.refresh(force=True)
+
     def new_discover(self):
         self.home()
 
@@ -1696,6 +1884,8 @@ class DiscoverView(QWidget):
             return
         if ex.busy:
             return
+        if not quiet and self.stack.currentIndex() != 0:
+            self.show_tab('dev')                       # a new scan is watched on the Devices tab
         if ex.mode == 'mstp' and not (ex.link and ex.link.on and ex.link.joined):
             if quiet:
                 return
@@ -1979,6 +2169,55 @@ class DiscoverView(QWidget):
                                                     o['desc'], '', '', '', '', '', '', '', '', o.get('uc'), '']))
         return '\r\n'.join(L) + '\r\n'
 
+    @staticmethod
+    def cx_html(devs, site=''):
+        """A printable commissioning (point check-out) sheet: one section per device, one row per point with the value
+        read now and empty Expected / OK / Checked by / Date / Notes columns to fill in on site."""
+        css = ('<style>@media print{.dev{page-break-before:always}.dev:first-of-type{page-break-before:auto}}'
+               'table.cx{border-collapse:collapse;width:100%;font-size:11px}table.cx th,table.cx td{border:1px solid #999;'
+               'padding:4px 6px;vertical-align:top}table.cx th{background:#eee;text-align:left}td.blank{min-width:70px}'
+               '.sign{margin-top:18px;display:flex;gap:40px}.sign div{flex:1;border-top:1px solid #333;padding-top:4px;'
+               'font-size:11px;color:#555}</style>')
+        out = [css, f'<h2>Point check-out sheet{(" – " + esc(site)) if site else ""}</h2>'
+                    f'<p class="mu">Values read live by Wirescope on {stamp()}. Fill in the blank columns on site.</p>']
+        for d in devs:
+            rows = []
+            for o in d.get('objs') or []:
+                if o['ty'] == 8:
+                    continue
+                pd = o.get('pd') or {}
+                st = pd.get('flags') or ''
+                rows.append(f"<tr><td>{esc(E.ABBR.get(o['ty'], E.sd_ty(o['ty'])))} {o['inst']}</td><td><b>{esc(o['name'])}</b></td>"
+                            f"<td>{esc(o['desc'])}</td><td>{esc(E.value_text(o))}</td><td>{esc('' if st == 'normal' else st)}</td>"
+                            '<td class="blank"></td><td class="blank" style="min-width:30px"></td><td class="blank"></td>'
+                            '<td class="blank"></td><td class="blank" style="min-width:120px"></td></tr>')
+            info = ' · '.join(x for x in [E.Explorer.addr(d), d.get('vendor') or '', d.get('model') or '',
+                                          f"firmware {d['fw']}" if d.get('fw') else '', d.get('loc') or ''] if x)
+            out.append(f"<div class='dev'><h3>Device {d['id']}{(' – ' + esc(d['name'])) if d.get('name') else ''}</h3>"
+                       f"<p class='mu'>{esc(info)}</p>"
+                       "<table class='cx'><tr><th>Object</th><th>Name</th><th>Description</th><th>Value now</th><th>Status</th>"
+                       "<th>Expected</th><th>OK</th><th>Checked by</th><th>Date</th><th>Notes</th></tr>"
+                       + (''.join(rows) or "<tr><td colspan='10'>No points read – press Read points first.</td></tr>")
+                       + "</table><div class='sign'><div>Technician</div><div>Date</div><div>Witnessed by</div></div></div>")
+        return doc('Point check-out sheet', ''.join(out))
+
+    def save_cx(self, devs):
+        devs = [d for d in devs if d and d.get('objs')]
+        if not devs:
+            return self.win.toast('Read the points first (Read points), then make the sheet')
+        name = f"checkout-device-{devs[0]['id']}.html" if len(devs) == 1 else 'checkout-sheet.html'
+        p, _ = QFileDialog.getSaveFileName(self, 'Save check-out sheet', name, 'Web page (*.html)')
+        if not p:
+            return
+        if not p.lower().endswith(('.html', '.htm')):
+            p += '.html'
+        try:
+            with open(p, 'w', encoding='utf-8') as f:
+                f.write(self.cx_html(devs))
+            self.win.toast('Saved ' + p + ' – open it in a browser and print')
+        except OSError as e:
+            self.win.toast(f'Save failed: {e.strerror}')
+
     def save_ede(self, name, devs):
         p, _ = QFileDialog.getSaveFileName(self, 'Save EDE file', name, 'EDE file (*.csv)')
         if not p:
@@ -2030,7 +2269,9 @@ class DiscoverView(QWidget):
                 ('csv', 'Spreadsheet – one row per device (*.csv)', 'csv', lambda: '﻿' + self.csv_devices()),
                 ('inventory', 'Site inventory – devices with point counts (*.csv)', 'csv', lambda: '﻿' + self.csv_inventory()),
                 ('ede', 'EDE file – every point read, for other BACnet tools (*.csv)', 'csv',
-                 lambda: self.ede_text(sorted((d for d in self.ex.devs.values() if d.get('objs')), key=lambda d: d['id'])))]
+                 lambda: self.ede_text(sorted((d for d in self.ex.devs.values() if d.get('objs')), key=lambda d: d['id']))),
+                ('checkout', 'Check-out sheet – every point read, printable (*.html)', 'html',
+                 lambda: self.cx_html(sorted((d for d in self.ex.devs.values() if d.get('objs')), key=lambda d: d['id'])))]
 
 
 # ============================================================ dialogs --
@@ -2087,11 +2328,12 @@ def arm_dialog(win):
     d = QDialog(win)
     d.setWindowTitle('Turn on write access?')
     v = QVBoxLayout(d)
-    v.addWidget(label('This lets you send Write Property commands (present-value, with a priority) to devices from the Discover '
-                      'tab. A wrong value can start or stop real equipment.'))
-    v.addWidget(label('• Only one point at a time, to one device, and each write asks you to confirm.\n'
+    v.addWidget(label('This lets you change devices from Discover: write a point’s value (with a priority) or release it, '
+                      'take points out of service, change schedules and calendars, set device clocks, restart a device and '
+                      'switch its communication off or on. A wrong value can start or stop real equipment.'))
+    v.addWidget(label('• One device at a time, never broadcast, and each change asks you to confirm.\n'
                       '• It switches itself off after the time you choose, and a red bar stays on screen while it is on.\n'
-                      '• Every write is recorded in the write log (and in writes.log next to the app’s settings).', muted=True))
+                      '• Every change is recorded in the write log (and in writes.log next to the app’s settings).', muted=True))
     ok = QCheckBox('I understand this changes live equipment')
     v.addWidget(ok)
     row = QHBoxLayout()

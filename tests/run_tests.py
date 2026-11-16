@@ -53,6 +53,8 @@ def main():
              ('Discover on MS/TP: no flicker, scroll kept', [py, 'flicker_test.py'], False),
              ('sample capture, overrides, BBMD checks, EDE, map in reports', [py, 'sample_test.py'], False),
              ('site health audit, trend logs, schedules, clocks, live watch', [py, 'site_test.py'], False),
+             ('field tools: guard, out of service, release, overrides, clocks, restart, Who-Has, COV, schedule '
+              'and calendar edits, BBMD tables, units', [py, 'tools_test.py'], False),
              ('light, dark and automatic theme on screen', [py, 'theme_test.py'], False),
              ('navigation and Back', [py, 'nav_test.py'], False),
              ('problem log and Report a problem', [py, 'log_test.py'], False),

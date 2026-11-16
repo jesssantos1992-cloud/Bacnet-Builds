@@ -1,8 +1,9 @@
 """
 bi_site.py - reading a site from its devices, with no user interface: trend log history (Read Range), schedules
 (weekly and exception schedules), device clocks, and the site health audit (points out of service, in fault, in
-alarm or overridden, switched-off trend logs, wrong clocks). Everything here only reads; it runs on the Discover
-engine (bi_explore.Explorer) and its read-only send path.
+alarm or overridden, switched-off trend logs, wrong clocks), and every active command for the site-wide override list.
+It runs on the Discover engine (bi_explore.Explorer) and its guarded send path: reading needs nothing, while setting a
+clock and writing a schedule or calendar only work while write access is switched on, and are recorded in the write log.
 """
 from __future__ import annotations
 
@@ -220,12 +221,13 @@ def parse_weekly(items_d, k, end, binary):
 
 
 def parse_exceptions(d, k, end, binary):
-    """exception-schedule: [{'when': text, 'tv': [(time, value)], 'pri': n}]."""
+    """exception-schedule: [{'when': text, 'tv': [(time, value)], 'pri': n, 'raw': the special event's bytes}]."""
     out = []
     while k < end:
         a = C.tg(d, k)
         if a.cx and a.n == 3 and a.o == 2:                    # end of the property value
             break
+        start = k
         ev = {'when': '?', 'tv': [], 'pri': ''}
         if a.cx and a.n == 0 and a.o == 1:                    # a calendar entry
             b = C.tg(d, a.v)
@@ -262,8 +264,181 @@ def parse_exceptions(d, k, end, binary):
         if b.cx and b.n == 3 and b.o == 0:
             ev['pri'] = C.num(d[b.v:b.v + b.len])
             k = b.v + b.len
+        ev['raw'] = bytes(d[start:k])
         out.append(ev)
     return out
+
+
+def parse_date_list(d, k, end):
+    """A calendar's date-list: [{'when': text, 'raw': the entry's bytes}]."""
+    out = []
+    while k < end:
+        a = C.tg(d, k)
+        if a.cx and a.n == 3 and a.o == 2:
+            break
+        start = k
+        if a.cx and a.n == 0 and a.o == 0:                    # [0] date
+            when = day_text(d[a.v:a.v + 4])
+            k = a.v + a.len
+        elif a.cx and a.n == 1 and a.o == 1:                  # [1] date range
+            x = C.tg(d, a.v)
+            y = C.tg(d, x.v + x.len)
+            when = f"{day_text(d[x.v:x.v + 4])} to {day_text(d[y.v:y.v + 4])}"
+            k = C.tg(d, y.v + y.len).v
+        elif a.cx and a.n == 2 and a.o == 0:                  # [2] week and day
+            mo, wk, dw = d[a.v], d[a.v + 1], d[a.v + 2]
+            when = ' '.join(p for p in [
+                {1: '1st', 2: '2nd', 3: '3rd', 4: '4th', 5: '5th', 6: 'last'}.get(wk, 'every'), DAYS[dw - 1] if 1 <= dw <= 7 else 'day',
+                'of ' + ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][mo] if 1 <= mo <= 12
+                else 'of every month'] if p)
+            k = a.v + a.len
+        else:
+            return out
+        out.append({'when': when, 'raw': bytes(d[start:k])})
+    return out
+
+
+# ---------------------------------------------------------- schedule edits --
+def _date_bytes(y, m, d):
+    """BACnet date (year - 1900, month, day, day of week)."""
+    import datetime
+    return [y - 1900, m, d, datetime.date(y, m, d).isoweekday()]
+
+
+def enc_value(txt, vt, binary=False):
+    """A schedule value typed by the user -> application-tagged bytes for the schedule's value type `vt`
+    (the BACnet application tag number: 1 boolean, 2 unsigned, 3 signed, 4 real, 5 double, 9 enumerated).
+    'relinquish' or 'null' writes NULL. None when the text does not fit the type."""
+    s = str(txt).strip().lower()
+    if s in ('relinquish', 'null', 'release'):
+        return [0x00]
+    if binary or vt == 9:
+        n = {'active': 1, 'on': 1, 'inactive': 0, 'off': 0}.get(s)
+        if n is None:
+            try:
+                n = int(s)
+            except ValueError:
+                return None
+        if not 0 <= n <= 65535:
+            return None
+        return [0x91, n] if n < 256 else [0x92, n >> 8, n & 255]
+    try:
+        if vt == 1:
+            return [0x11] if s in ('true', '1', 'on', 'active') else [0x10] if s in ('false', '0', 'off', 'inactive') else None
+        if vt == 2:
+            n = int(s)
+            return app_unsigned(n) if n >= 0 else None
+        if vt == 3:
+            return app_signed(int(s))
+        if vt == 5:
+            return [0x55, 8, *struct.pack('>d', float(s))]
+        f = float(s)
+        if f != f or f in (float('inf'), float('-inf')):
+            return None
+        return [0x44, *struct.pack('>f', f)]
+    except ValueError:
+        return None
+
+
+def parse_changes(text, vt, binary=False):
+    """'07:00 active, 18:00 inactive' -> [(h, m, value bytes)] sorted by time, or raises ValueError with a reason."""
+    out = []
+    for part in re.split(r'[,;\n]+', text or ''):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(.+)$', part)
+        if not m:
+            raise ValueError(f'“{part}” – write a time and a value, for example 07:00 active')
+        h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        if h > 23 or mi > 59 or s > 59:
+            raise ValueError(f'“{part}” – the time is not valid')
+        v = enc_value(m.group(4), vt, binary)
+        if v is None:
+            raise ValueError(f'“{m.group(4).strip()}” is not a valid value for this schedule')
+        out.append((h, mi, s, v))
+    out.sort(key=lambda x: x[:3])
+    return out
+
+
+def _tv_bytes(changes):
+    return [b for h, mi, s, v in changes for b in [0xB4, h, mi, s, 0, *v]]
+
+
+def enc_week(days):
+    """weekly-schedule value: seven parsed day lists (Monday first)."""
+    return [b for ch in days for b in [0x0E, *_tv_bytes(ch), 0x0F]]
+
+
+def enc_special_event(start, end, changes, pri):
+    """An exception: one date (end None) or a date range, its changes, and its priority (1-16)."""
+    if end is None or end == start:
+        period = [0x0E, 0x0C, *_date_bytes(*start), 0x0F]
+    else:
+        period = [0x0E, 0x1E, 0xA4, *_date_bytes(*start), 0xA4, *_date_bytes(*end), 0x1F, 0x0F]
+    return bytes(period + [0x2E, *_tv_bytes(changes), 0x2F, 0x39, pri])
+
+
+def enc_date_entry(start, end=None):
+    """A calendar date-list entry: one date or a date range."""
+    if end is None or end == start:
+        return bytes([0x0C, *_date_bytes(*start)])
+    return bytes([0x1E, 0xA4, *_date_bytes(*start), 0xA4, *_date_bytes(*end), 0x1F])
+
+
+def fits(dev, apdu):
+    """Does a request fit in one message to this device (no segmenting)? Leaves room for the network header."""
+    return len(apdu) + 24 <= (dev.get('mx') or 480)
+
+
+def write_schedule(ex, dev, o, week=None, exc=None):
+    """Write a schedule's weekly-schedule (seven parsed days) and/or exception-schedule (a list of special-event bytes).
+    Returns (ok, message)."""
+    msgs = []
+    for prop, val, what in ((123, enc_week(week) if week is not None else None, 'weekly schedule'),
+                            (38, [b for ev in exc for b in ev] if exc is not None else None, 'exceptions')):
+        if val is None:
+            continue
+        apdu = E.ex_wp(o, val, None, prop)
+        if not fits(dev, apdu):
+            return False, f'The {what} are too long to send to this device in one message ({len(apdu)} bytes). Remove some entries.'
+        ok, msg = ex.write_prop(dev, o, prop, val, f"schedule {E.o_i(o)} · {what}",
+                                f'{what} written' + (f" ({sum(len(d) for d in week)} changes)" if prop == 123 else
+                                                     f' ({len(exc)} entries)'))
+        if not ok:
+            return False, f'The {what}: {msg}'
+        msgs.append(f'{what.capitalize()} saved.')
+    return True, ' '.join(msgs) or 'Nothing to save.'
+
+
+def calendar(ex, dev, o):
+    """{'name', 'pv': true/false (today is in the calendar), 'dates': [{'when','raw'}], 'err'}."""
+    out = {'name': '', 'pv': '', 'dates': [], 'err': ''}
+    r = ex.req(dev, E.ex_rpm([[o, [77, 85]]]), 5.0)
+    if r.get('d'):
+        L = E.ex_dec_rpm(r['d'], r['k'], r['L'])
+        pr = L[0]['pr'] if L else {}
+        nm, pv = _first(pr, 77), _first(pr, 85)
+        out['name'] = E.unq(nm['s']) if nm else ''
+        out['pv'] = pv['s'] if pv else ''
+    else:
+        out['err'] = _why(r)
+        return out
+    x = _prop_value(ex.rpc(dev, o, 23))
+    if x:
+        out['dates'] = parse_date_list(x[0], x[1], x[2])
+    else:
+        out['err'] = 'Could not read the date list.'
+    return out
+
+
+def write_calendar(ex, dev, o, entries):
+    """Write a calendar's date-list (a list of entry bytes). Returns (ok, message)."""
+    val = [b for e in entries for b in e]
+    apdu = E.ex_wp(o, val, None, 23)
+    if not fits(dev, apdu):
+        return False, f'The date list is too long to send to this device in one message ({len(apdu)} bytes).'
+    return ex.write_prop(dev, o, 23, val, f'calendar {E.o_i(o)} · date list', f'{len(entries)} dates written')
 
 
 def _prop_value(r):
@@ -364,8 +539,10 @@ def trend(ex, dev, o, limit=2000, progress=None):
 
 # ---------------------------------------------------------------- schedule --
 def schedule(ex, dev, o):
-    """{'name','pv','default','period','week': [7 lists of (time, value)], 'exc': [...], 'refs', 'err'}."""
-    out = {'name': '', 'pv': '', 'default': '', 'period': '', 'week': [], 'exc': [], 'refs': 0, 'err': ''}
+    """{'name','pv','default','period','week': [7 lists of (time, value)], 'exc': [...], 'refs', 'err',
+    'vt': the application tag of its values (for writing), 'binary'}."""
+    out = {'name': '', 'pv': '', 'default': '', 'period': '', 'week': [], 'exc': [], 'refs': 0, 'err': '', 'vt': 4,
+           'binary': False}
     r = ex.req(dev, E.ex_rpm([[o, [77, 85, 174, 32]]]), 5.0)
     if r.get('d'):
         L = E.ex_dec_rpm(r['d'], r['k'], r['L'])
@@ -382,6 +559,8 @@ def schedule(ex, dev, o):
         out['err'] = _why(r)
         return out
     binary = out['pv'] in ('active', 'inactive') or (pv is not None and pv['n'] == 9 and out['pv'] in ('0', '1'))
+    out['binary'] = binary
+    out['vt'] = next((x['n'] for x in (df, pv) if x is not None and x['n'] not in (0, None)), 4)
     if binary:
         out['pv'], out['default'] = ({'1': 'active', '0': 'inactive'}.get(x, x) for x in (out['pv'], out['default']))
     w = ex.rpc(dev, o, 123)
@@ -458,6 +637,78 @@ def clock_verdict(off):
     if a < 86400 * 2:
         return (f"{a / 3600:.1f} hours {'fast' if off > 0 else 'slow'}", True)
     return (f"{round(a / 86400)} days {'fast' if off > 0 else 'slow'}: the clock was probably never set", True)
+
+
+def sync_clock(ex, dev, utc=False):
+    """Set the device clock to this PC's time (Time Synchronization, or UTC Time Synchronization), then read it back.
+    Returns the clock() result with 'sent' (True when it went out) and 'err'."""
+    try:
+        ex.send_unconfirmed(dev, E.ex_time_sync(utc=utc))
+    except RuntimeError as e:
+        ex.log_cmd(dev, 'device clock', 'set to ' + ('UTC' if utc else 'local') + ' time', str(e))
+        return {'sent': False, 'err': str(e), 'off': None, 'bad': True, 'text': str(e)}
+    time.sleep(3.0 if E.is_mstp(dev) else 1.0)              # let the device apply it
+    r = clock(ex, dev)
+    r['sent'] = True
+    res = 'no answer when read back' if r['err'] else ('clock correct' if not r['bad'] else 'still wrong: ' + r['text'])
+    ex.log_cmd(dev, 'device clock', 'set to this PC’s ' + ('UTC' if utc else 'local') + ' time',
+               'accepted' if not r['err'] and not r['bad'] else res, rb=r.get('text') or '')
+    return r
+
+
+# --------------------------------------------------------------- overrides --
+def overrides(ex, devs, progress=None):
+    """Every active command in every commandable point (priority array), for the site-wide release list.
+    Returns {'at', 'items': [{'key','id','dname','o','ty','inst','name','pri','val','ctl','unit'}], 'errs', 'stopped'}."""
+    ex.stop = False
+    res = {'at': time.time(), 'items': [], 'errs': [], 'stopped': False, 'n': 0}
+    for i, dev in enumerate(devs):
+        if ex.stop:
+            res['stopped'] = True
+            break
+        name = dev.get('name') or f"Device {dev['id']}"
+        if progress:
+            progress(i, len(devs), name, 0, 0)
+        if not dev.get('objs') and not ex.read_objlist(dev, 1 if E.is_mstp(dev) else 3):
+            res['errs'].append(f"{name}: {dev.get('pm') or 'could not read the object list'}")
+            continue
+        rows = [x for x in dev.get('objs') or [] if x['ty'] in E.CMD_T]
+        res['n'] += len(rows)
+        done = [0]
+
+        def one(batch, dev=dev, name=name, i=i, rows=rows, done=done):
+            r = ex.req(dev, E.ex_rpm([[x['o'], [77, 87, 117]] for x in batch]), 5.0)
+            got = {e['o']: e['pr'] for e in E.ex_dec_rpm(r['d'], r['k'], r['L'])} if r.get('d') else {}
+            for x in batch:
+                pr = got.get(x['o'])
+                if pr is None and not r.get('fatal'):
+                    q = ex.req(dev, E.ex_rpm([[x['o'], [77, 87, 117]]]), 5.0)
+                    L = E.ex_dec_rpm(q['d'], q['k'], q['L']) if q.get('d') else []
+                    pr = L[0]['pr'] if L else None
+                if not pr or not pr.get(87):
+                    continue
+                nm, u = _first(pr, 77), _first(pr, 117)
+                if nm and not x.get('name'):
+                    x['name'] = E.unq(nm['s'])
+                if u and u['raw'] is not None:
+                    x['uc'], x['u'] = u['raw'], E.EXU.get(u['raw'], '')
+                first = True
+                for p, v in enumerate(pr[87][:16]):
+                    if v['n'] == 0:
+                        continue
+                    s = ('active' if v['raw'] == 1 else 'inactive') if 3 <= x['ty'] <= 5 and v['n'] == 9 else v['s']
+                    res['items'].append({'key': dev['key'], 'id': dev['id'], 'dname': name, 'o': x['o'], 'ty': x['ty'],
+                                         'inst': x['inst'], 'name': x.get('name') or f"{E.sd_ty(x['ty'])} {x['inst']}",
+                                         'pri': p + 1, 'val': s, 'ctl': first, 'row': x, 'dev': dev})
+                    first = False
+            done[0] += len(batch)
+            if progress:
+                progress(i, len(devs), name, done[0], len(rows))
+        per = 3 if (dev.get('mx') or 480) >= 1024 else 2
+        ex.pool_map([rows[j:j + per] for j in range(0, len(rows), per)], 1 if E.is_mstp(dev) else 3, one)
+    res['items'].sort(key=lambda x: (x['id'], x['ty'], x['inst'], x['pri']))
+    res['stopped'] = res['stopped'] or ex.stop
+    return res
 
 
 # ------------------------------------------------------------------- audit --

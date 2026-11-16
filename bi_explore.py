@@ -1,9 +1,11 @@
 """
-bi_explore.py - the Discover client: scan for devices (Who-Is), read their names and points,
-and (only while write access is switched on) write present-value of one point.
+bi_explore.py - the Discover client: scan for devices (Who-Is), find a point (Who-Has), read names, points and BBMD
+tables, subscribe to COV for a few minutes, and - only while write access is switched on, to one device at a time -
+write a point (present-value, out-of-service, a schedule or a calendar), set a clock, restart a device or switch its
+communication off and on.
 
-Every packet goes through bacnet_live.RELAY, which refuses anything except Who-Is, reads and
-that one guarded write - this module cannot change a device in any other way.
+Every packet goes through bacnet_live.RELAY (and its rules for MS/TP), which refuses anything else - this module
+cannot change a device in any other way. Every change is recorded in the write log.
 """
 from __future__ import annotations
 
@@ -175,8 +177,62 @@ def ex_rpm(lst):
     return a
 
 
-def ex_wp(o, val, pri):
-    return [0, 5, 0, 15, 12, *be4(o), 0x19, 85, 0x3E, *val, 0x3F] + ([0x49, pri] if pri else [])
+def ex_wp(o, val, pri, prop=85):
+    return [0, 5, 0, 15, 12, *be4(o), 0x19, prop, 0x3E, *val, 0x3F] + ([0x49, pri] if pri else [])
+
+
+def _ctx_uint(n, v):
+    b = v.to_bytes(max(1, (v.bit_length() + 7) // 8), 'big')
+    return [(n << 4) | 8 | len(b), *b]
+
+
+def _ctx_str(n, s):
+    b = [0, *str(s).encode('utf-8', 'replace')]                  # character set 0 (UTF-8)
+    return ([(n << 4) | 8 | len(b)] if len(b) < 5 else [(n << 4) | 0x0D, len(b)]) + b
+
+
+def _app_str(s):
+    b = [0, *str(s).encode('utf-8', 'replace')]
+    return ([0x70 | len(b)] if len(b) < 5 else [0x75, len(b)]) + b
+
+
+REINIT = {0: 'cold start', 1: 'warm start'}
+DCC = {0: 'enable', 1: 'disable', 2: 'disable initiation'}
+
+
+def ex_reinit(state, password=''):
+    """ReinitializeDevice: 0 = cold start, 1 = warm start."""
+    return [0, 5, 0, 20, 0x09, state] + (_ctx_str(1, password) if password else [])
+
+
+def ex_dcc(mode, minutes=0, password=''):
+    """DeviceCommunicationControl: 0 enable, 1 disable, 2 disable initiation; minutes 0 = until enabled again."""
+    return [0, 5, 0, 17] + (_ctx_uint(0, minutes) if minutes else []) + [0x19, mode] + (_ctx_str(2, password) if password else [])
+
+
+def ex_time_sync(t=None, utc=False):
+    """(UTC)TimeSynchronization APDU for time t (now when None)."""
+    t = time.time() if t is None else t
+    tm = time.gmtime(t) if utc else time.localtime(t)
+    hs = int((t % 1) * 100)
+    return [0x10, 9 if utc else 6, 0xA4, tm.tm_year - 1900, tm.tm_mon, tm.tm_mday, tm.tm_wday + 1,
+            0xB4, tm.tm_hour, tm.tm_min, tm.tm_sec, hs]
+
+
+COV_PID = 87                                       # our subscriber process identifier
+
+
+def ex_subscribe_cov(o, lifetime=300, cancel=False):
+    a = [0, 5, 0, 5, *_ctx_uint(0, COV_PID), 0x1C, *be4(o)]
+    return a if cancel else a + [0x29, 0] + _ctx_uint(3, lifetime)
+
+
+def ex_who_has(name=None, o=None, lo=None, hi=None):
+    """Who-Has by object name or by object identifier, optionally only to a range of device IDs."""
+    a = [0x10, 7]
+    if lo is not None and hi is not None:
+        a += _ctx_uint(0, lo) + _ctx_uint(1, hi)
+    return a + ([0x2C, *be4(o)] if o is not None else _ctx_str(3, name or ''))
 
 
 def ex_enc(ty, txt):
@@ -305,26 +361,44 @@ def ip_of(k):
 
 MS_T = (13, 14, 19)                     # multi-state input, output and value
 TEMP_PREF = ''                           # '' = as the device sends it, 'F' or 'C': how temperatures are shown (View menu)
+PRESS_PREF = ''                          # '' / 'Pa' / 'inH2O': how air pressures are shown
+FLOW_PREF = ''                           # '' / 'cfm' / 'L/s': how air flows are shown
 _TEMP = {62: 'C', 64: 'F'}               # BACnet unit codes: degrees Celsius, degrees Fahrenheit
+_PRESS = {53: 'Pa', 58: 'inH2O'}         # pascals, inches of water
+_FLOW = {84: 'cfm', 87: 'L/s'}           # cubic feet per minute, litres per second
+UNIT_LABEL = {'C': '°C', 'F': '°F', 'Pa': 'Pa', 'inH2O': 'inH₂O', 'cfm': 'cfm', 'L/s': 'L/s'}
+_FACTOR = {('Pa', 'inH2O'): 1 / 249.0889, ('inH2O', 'Pa'): 249.0889,     # multiply by this to convert
+           ('cfm', 'L/s'): 0.4719474, ('L/s', 'cfm'): 1 / 0.4719474}
 _NUM = re.compile(r'^\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)(.*)$')
 
 
 def temp_to(uc):
-    """'F' or 'C' when a value in unit `uc` is shown converted, else None."""
-    src = _TEMP.get(uc)
-    return TEMP_PREF if src and TEMP_PREF and TEMP_PREF != src else None
+    """The unit a value in BACnet unit `uc` is shown in ('F', 'C', 'Pa', 'inH2O', 'cfm', 'L/s') when it is converted
+    (View menu: temperature, pressure, flow), else None."""
+    for table, pref in ((_TEMP, TEMP_PREF), (_PRESS, PRESS_PREF), (_FLOW, FLOW_PREF)):
+        src = table.get(uc)
+        if src:
+            return pref if pref and pref != src else None
+    return None
+
+
+def _src(uc):
+    return _TEMP.get(uc) or _PRESS.get(uc) or _FLOW.get(uc)
 
 
 def conv(x, uc, delta=False, back=False):
-    """A temperature (or, with delta, a difference such as a deadband) from the device's unit to the one shown,
+    """A value (or, with delta, a difference such as a deadband) from the device's unit to the one shown,
     or with back=True from the one shown to the device's."""
     t = temp_to(uc)
     if t is None or x is None:
         return x
-    to_f = (t == 'F') != back
-    if delta:
-        return x * 1.8 if to_f else x / 1.8
-    return x * 1.8 + 32 if to_f else (x - 32) / 1.8
+    if t in ('F', 'C'):
+        to_f = (t == 'F') != back
+        if delta:
+            return x * 1.8 if to_f else x / 1.8
+        return x * 1.8 + 32 if to_f else (x - 32) / 1.8
+    a, b = (t, _src(uc)) if back else (_src(uc), t)
+    return x * _FACTOR[(a, b)]
 
 
 def num_fmt(x, places=2):
@@ -333,16 +407,17 @@ def num_fmt(x, places=2):
 
 
 def temp_text(s, uc, delta=False):
-    """A value's text in the temperature unit chosen in the View menu (other text is left alone)."""
+    """A value's text in the unit chosen in the View menu (temperature, pressure or flow; other text is left alone)."""
     m = _NUM.match(str(s or ''))
-    if not m or temp_to(uc) is None:
+    t = temp_to(uc)
+    if not m or t is None:
         return s
-    return num_fmt(conv(float(m.group(1)), uc, delta)) + m.group(2)
+    return num_fmt(conv(float(m.group(1)), uc, delta), 3 if t == 'inH2O' else 2) + m.group(2)
 
 
 def unit_of(row):
     t = temp_to(row.get('uc'))
-    return {'C': '°C', 'F': '°F'}[t] if t else row.get('u', '') or ''
+    return UNIT_LABEL[t] if t else row.get('u', '') or ''
 
 
 def temp_pd(pd, row):
@@ -396,6 +471,70 @@ def pv_text(row_ty, v):
     return s
 
 
+def parse_bvlc_table(raw, fn):
+    """Read-BDT-Ack (fn 3): [{'ip','port','mask'}]; Read-FDT-Ack (fn 7): [{'ip','port','ttl','left'}]."""
+    out = []
+    L = min(len(raw), raw[2] << 8 | raw[3]) if len(raw) >= 4 else 0
+    for k in range(4, L - 9, 10):
+        e = raw[k:k + 10]
+        x = {'ip': '.'.join(str(b) for b in e[:4]), 'port': e[4] << 8 | e[5]}
+        if fn == 3:
+            x['mask'] = '.'.join(str(b) for b in e[6:10])
+        else:
+            x['ttl'], x['left'] = e[6] << 8 | e[7], e[8] << 8 | e[9]
+        out.append(x)
+    return out
+
+
+def parse_ihave(d, k, L):
+    """I-Have: device identifier, object identifier, object name -> {'id','o','name'} or None."""
+    out = []
+    while k < L and len(out) < 3:
+        a = C.tg(d, k)
+        if a.cx:
+            return None
+        out.append(C.num(d[a.v:a.v + a.len]) if a.n == 12 else unq(C.pv(d, a, d[k])))
+        k = a.v + a.len
+    if len(out) < 3 or not isinstance(out[0], int) or o_t(out[0]) != 8:
+        return None
+    return {'id': o_i(out[0]), 'o': out[1], 'name': out[2]}
+
+
+def parse_cov(d, k, L):
+    """Unconfirmed COV notification -> (device id, object id, {property: [values]}) or None."""
+    try:
+        vals, dev, obj = {}, None, None
+        while k < L:
+            a = C.tg(d, k)
+            if a.cx and a.o == 0 and a.n in (0, 3):
+                k = a.v + a.len
+            elif a.cx and a.o == 0 and a.n in (1, 2):
+                v = C.num(d[a.v:a.v + 4])
+                dev, obj = (o_i(v), obj) if a.n == 1 else (dev, v)
+                k = a.v + a.len
+            elif a.cx and a.n == 4 and a.o == 1:            # list of values
+                k = a.v
+                p = None
+                while k < L:
+                    b = C.tg(d, k)
+                    if b.cx and b.n == 4 and b.o == 2:
+                        k = b.v
+                        break
+                    if b.cx and b.o == 0 and b.n == 0:
+                        p = C.num(d[b.v:b.v + b.len])
+                        k = b.v + b.len
+                    elif b.cx and b.o == 1 and b.n == 2:
+                        vals[p], k = ex_vals(d, b.v, L)
+                    else:
+                        k = b.v + b.len
+                break
+            else:
+                return None
+        return (dev, obj, vals) if dev is not None and obj is not None else None
+    except (IndexError, ValueError):
+        return None
+
+
 class _Pending:
     __slots__ = ('dev', 'ev', 'res')
 
@@ -432,6 +571,9 @@ class Explorer:
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix='bacnet-discover')
         self.link = None                                   # bi_mstp.MstpLink while joined to an MS/TP trunk
         self.mode = store.get('bi_dmode') or 'ip'          # 'ip' or 'mstp': how Discover reaches devices
+        self.ihave = []                                    # I-Have answers to Who-Has: {'id','o','name','ip','t'}
+        self.cov_listeners = []                            # fn(device id, object id, {prop: values}) for COV notifications
+        self.bvlc = {}                                     # BBMD answers by IP: {'bdt': [...], 'fdt': [...], 'nak': code}
 
     # -------------------------------------------------------------- plumbing --
     def armed(self):
@@ -445,13 +587,74 @@ class Explorer:
     def save_opt(self):
         self.store.set('bi_discopt', self.opt)
 
+    def hist_keep(self):
+        """How many discovers the History tab keeps (0 = history off)."""
+        v = self.store.get('bi_hist_keep')
+        return 10 if v is None else int(v)
+
     def cache(self):
-        """Discovered devices are not kept when the app closes: every start is a fresh list."""
+        """Every start is a fresh list, but each discover is kept in the History tab: this saves the current one
+        (a second after the last change, in the background, so a burst of reads saves once)."""
+        if self.hist_keep() <= 0:
+            return
+        with self.lock:
+            t = getattr(self, '_hist_t', None)
+            if t:
+                t.cancel()
+            self._hist_t = threading.Timer(1.0, self._hist_save)
+            self._hist_t.daemon = True
+            self._hist_t.start()
+
+    def _hist_save(self):
+        import bi_history as H
+        ms = self.mode == 'mstp'
+        devs = [d for d in list(self.devs.values()) if is_mstp(d) == ms and not d.get('hist')]
+        if self.mode == 'mstp':
+            where = f"MS/TP {getattr(self.link, 'port', '') or ''}".strip()
+        else:
+            ad = getattr(self.relay, 'iface', None) or {}
+            where = 'BACnet/IP' + (f" · {ad.get('name') or ad.get('ip')}" if ad else '')
+        try:
+            sid = H.save(getattr(self, 'hist_id', None), devs, self.mode, where, self.hist_keep())
+        except OSError:
+            return
+        if sid:
+            self.hist_id = sid
+            self.hist_seq = getattr(self, 'hist_seq', 0) + 1
+            self.notify()
+
+    def open_history(self, snap):
+        """Put a saved discover's devices (and the points read then) back in the Discover list, marked as from
+        History until they answer again. Devices already in the list are left as they are. Returns how many were added."""
+        when = time.strftime('%Y-%m-%d %H:%M', time.localtime(snap['meta']['at']))
+        n = 0
+        for d in snap['devs']:
+            if d['key'] in self.devs:
+                continue
+            e = dict(d)
+            e.update(old=1, hist=1, st=f'from History ({when})')
+            e.setdefault('sn', None)
+            e.setdefault('sa', '')
+            e.setdefault('route', None)
+            e.setdefault('port', 47808)
+            if e.get('objs') is not None:
+                e['objs'] = [{'name': '', 'val': '', 'u': '', 'desc': '', **o} for o in e['objs']]
+            else:
+                e['objs'] = None
+            self.devs[e['key']] = e
+            n += 1
+        self.notify()
+        return n
+
+    def new_history(self):
+        """The next save starts a new entry in History (a new scan, or the list was cleared)."""
+        self.hist_id = None
 
     def clear(self):
         """Forget every discovered device. Returns what was there, so it can be put back (Undo)."""
         old = (self.devs, self.scan_at, self.audit)
         self.devs, self.scan_at, self.audit = {}, 0, None
+        self.new_history()
         self.msg = ''
         self.notify()
         return old
@@ -521,6 +724,11 @@ class Explorer:
             return
         if d[1] == 0:
             self.bbmd_rc = d[4] << 8 | d[5]
+            if self.bbmd_rc in (0x20, 0x40):                # Read-BDT / Read-FDT refused
+                self.bvlc.setdefault(it['ip'], {})['nak'] = self.bbmd_rc
+            return
+        if d[1] in (0x03, 0x07):                           # Read-BDT-Ack / Read-FDT-Ack
+            self.bvlc.setdefault(it['ip'], {})['bdt' if d[1] == 3 else 'fdt'] = parse_bvlc_table(raw, d[1])
             return
         ip, port = it['ip'], it['port']
         i = 4
@@ -556,6 +764,23 @@ class Explorer:
         if c & 128:
             return
         t = d[i] >> 4
+        if t == 1 and d[i + 1] == 1:                       # I-Have (answer to Who-Has)
+            x = parse_ihave(d, i + 2, L)
+            if x:
+                x.update(ip=ip, port=port, mac=mac, sn=sn, sa=sa, t=time.time())
+                self.ihave.append(x)
+                del self.ihave[:-500]
+                self.notify()
+            return
+        if t == 1 and d[i + 1] == 2:                       # unconfirmed COV notification
+            x = parse_cov(d, i + 2, L)
+            if x:
+                for fn in list(self.cov_listeners):
+                    try:
+                        fn(*x)
+                    except Exception:
+                        pass
+            return
         if t == 1 and d[i + 1] == 0:                       # I-Am
             k = i + 2
             a = C.tg(d, k)
@@ -589,6 +814,7 @@ class Explorer:
                 old.update(nd)
                 old.update(keep)
                 old['old'] = 0
+                old.pop('hist', None)                      # opened from History, and it answered: live again
                 old['st'] = 'ok' if old.get('name') else 'found'
             else:
                 self.devs[key] = nd
@@ -735,6 +961,7 @@ class Explorer:
 
     def scan(self, on_done=None):
         """Who-Is (twice), then read every new device's name. Runs on the calling (worker) thread."""
+        self.new_history()
         self.stop = False
         self.busy = 'scan'
         self.msg = 'Looking for devices…'
@@ -819,6 +1046,7 @@ class Explorer:
         self.pool_map([d for d in found if not d.get('name') or d.get('st') == 'found'], 4, self.info)
         self.labels_from_names()
         self.busy = ''
+        self.cache()
         self.notify()
         return found
 
@@ -984,6 +1212,7 @@ class Explorer:
         row['ok'] = 1
 
     def values_all(self, dev):
+        dev.pop('hist', None)                              # read live now, so it belongs in this discover's history
         self.stop = False
         self.busy = 'browse'
         rows = dev.get('objs') or []
@@ -1010,6 +1239,7 @@ class Explorer:
         self.pool_map(B, 4, one)
         dev['pm'] = ''
         self.busy = ''
+        self.cache()                                       # the points read go into History
         self.notify()
 
     def read_one(self, dev, row):
@@ -1045,7 +1275,7 @@ class Explorer:
                     return unq(v['s']) if v and v['n'] != 0 else ''        # a NULL value shows as blank
                 pd['ok'] = 1
                 pd.update(cov=S(22), res=S(106), min=S(69), max=S(65), rel=S(103), prof=S(168), rd=S(104),
-                          hi=S(45), lo=S(59), db=S(25), nc=S(17), flags=status_flags(S(111)))
+                          hi=S(45), lo=S(59), db=S(25), nc=S(17), flags=status_flags(S(111)), fb=S(111))
                 es = g(36)
                 pd['es'] = EVENT_STATE.get(es['raw'], es['s']) if es and es['raw'] is not None else ''
                 o = g(81)
@@ -1321,6 +1551,144 @@ class Explorer:
         self.store.set('bi_wlog', self.wlog)
         self.notify()
         return e, msg, ok
+
+    def log_cmd(self, dev, what, detail, res, rb=''):
+        """Record a command that is not a present-value write (restart, clock set, schedule...) in the write log."""
+        e = {'t': time.time() * 1000, 'dev': dev['id'], 'dname': dev.get('name') or '', 'obj': what, 'pname': '',
+             'val': detail, 'pri': '', 'res': res}
+        if rb:
+            e['rb'] = rb
+        self.wlog.insert(0, e)
+        del self.wlog[200:]
+        self.store.set('bi_wlog', self.wlog)
+        self.notify()
+        return e
+
+    @staticmethod
+    def why(r):
+        return 'No answer from the device.' if r.get('to') else (r.get('err') or 'The device could not answer.')
+
+    def write_prop(self, dev, o, prop, val, what, shown, pri=None):
+        """WriteProperty of out-of-service, a schedule or a date list (the relay refuses anything else).
+        Returns (ok, message) and records it in the write log."""
+        if not self.armed():
+            return False, 'Write access is switched off.'
+        r = self.req(dev, ex_wp(o, val, pri, prop), 6.0, 1)
+        ok = bool(r.get('ok'))
+        msg = 'Accepted by the device.' if ok else ('No answer from the device – it may or may not have changed.'
+                                                    if r.get('to') else 'Not written: ' + str(r.get('err') or 'failed'))
+        if not ok:
+            for k, hint in WHINT:
+                if k in str(r.get('err') or ''):
+                    msg += ' ' + hint
+                    break
+        self.log_cmd(dev, what, shown, 'accepted' if ok else ('no answer' if r.get('to') else r.get('err') or 'failed'))
+        return ok, msg
+
+    def set_oos(self, dev, row, on):
+        """Switch a point's out-of-service on or off, then read it back. Returns (ok, message)."""
+        ok, msg = self.write_prop(dev, row['o'], 81, [0x11 if on else 0x10], f"{sd_ty(row['ty'])} {row['inst']}"
+                                  + (f" · {row['name']}" if row.get('name') else ''),
+                                  'out of service ON' if on else 'out of service OFF')
+        if ok:
+            b = self.req(dev, ex_rpm([[row['o'], [81, 85, 111]]]), 4.0)
+            L = ex_dec_rpm(b['d'], b['k'], b['L']) if b.get('d') else []
+            pr = L[0]['pr'] if L else {}
+            v = pr.get(81)
+            now = (v[0]['raw'] == 1 or 'true' in v[0]['s'].lower()) if v else None
+            if row.get('pd'):
+                row['pd']['oos'] = now
+                if pr.get(111):
+                    row['pd']['flags'] = status_flags(pr[111][0]['s'])
+            if pr.get(85):
+                row['val'] = pv_text(row['ty'], pr[85][0])
+            msg = ('Out of service is now ' + ('ON: the present value no longer follows the field, so you can write it.'
+                   if now else 'OFF: the point follows the field again.')) if now is not None else msg
+            if now is not None and now != on:
+                ok, msg = False, 'The device accepted the write but out of service did not change (it may be locked).'
+            self.notify()
+        return ok, msg
+
+    def device_command(self, dev, apdu, what, shown):
+        """ReinitializeDevice or DeviceCommunicationControl (the relay checks both). Returns (ok, message)."""
+        if not self.armed():
+            return False, 'Write access is switched off.'
+        r = self.req(dev, apdu, 6.0, 1)
+        ok = bool(r.get('ok'))
+        if ok:
+            msg = 'Accepted by the device.'
+        elif r.get('to'):
+            msg = 'No answer from the device – it may or may not have done it.'
+        else:
+            e = str(r.get('err') or 'failed')
+            msg = 'Refused: ' + e + (' – check the password.' if 'password' in e else '')
+        self.log_cmd(dev, what, shown, 'accepted' if ok else ('no answer' if r.get('to') else r.get('err') or 'failed'))
+        return ok, msg
+
+    def send_unconfirmed(self, dev, apdu):
+        """An unconfirmed request to one device (time synchronisation). Raises RuntimeError when it cannot be sent."""
+        self.pump()
+        if is_mstp(dev):
+            self.send_mstp(dev['mac'], ex_npdu(dev.get('route'), apdu, 0), False)
+        else:
+            self.send(f"{dev['ip']}:{dev['port']}", ex_wrap(dev.get('route'), apdu, 0))
+
+    def subscribe_cov(self, dev, o, lifetime=300, cancel=False):
+        """SubscribeCOV (unconfirmed notifications, limited lifetime) or cancel it: {'ok'} / {'err'} / {'to'}."""
+        return self.req(dev, ex_subscribe_cov(o, lifetime, cancel), 4.0, 1)
+
+    def who_has(self, name=None, o=None, lo=None, hi=None, wait=3.0):
+        """Ask every device which one has this point. Returns the I-Have answers (newest first, one per device)."""
+        self.pump()
+        ap = ex_who_has(name, o, lo, hi)
+        t0 = time.time()
+        bbmd = (self.opt.get('bbmd') or '').strip()
+        dest = self.opt.get('to') or 'broadcast'
+        for _ in range(2):
+            if self.mode == 'mstp':
+                self.send_mstp(255, ex_npdu(None, ap, 0, True), False)
+            else:
+                if dest == 'broadcast':
+                    self.send('broadcast', ex_wrap(None, ap, 0, True))
+                else:
+                    self.send(dest if ':' in dest else dest + ':47808', ex_wrap(None, ap, 0, False, 0x0B))
+                if bbmd:
+                    self.send(bbmd if ':' in bbmd else bbmd + ':47808', ex_wrap(None, ap, 0, False, 0x09))
+            end = time.time() + wait / 2
+            while time.time() < end and not self.stop:
+                time.sleep(0.1)
+        seen, out = set(), []
+        for x in reversed(self.ihave):
+            if x['t'] >= t0 and (x['id'], x['o']) not in seen:
+                seen.add((x['id'], x['o']))
+                out.append(x)
+        return out
+
+    def read_bbmd(self, addr, wait=2.5):
+        """Read a BBMD's broadcast distribution table and foreign device table.
+        Returns {'ip', 'bdt': [...] or None, 'fdt': [...] or None, 'err'}."""
+        self.pump()
+        host, _, port = addr.strip().partition(':')
+        dest = f'{host}:{port or 47808}'
+        self.bvlc.pop(host, None)
+        out = {'ip': host, 'bdt': None, 'fdt': None, 'err': ''}
+        try:
+            for fn in (0x02, 0x06):
+                self.send(dest, bytes([0x81, fn, 0, 4]))
+                end = time.time() + wait
+                key = 'bdt' if fn == 2 else 'fdt'
+                while time.time() < end and key not in self.bvlc.get(host, {}) and 'nak' not in self.bvlc.get(host, {}):
+                    time.sleep(0.05)
+                got = self.bvlc.get(host, {})
+                out[key] = got.get(key)
+                if got.pop('nak', None) is not None and out[key] is None:
+                    out[key + '_nak'] = True
+        except RuntimeError as e:
+            out['err'] = str(e)
+            return out
+        if out['bdt'] is None and out['fdt'] is None and not out.get('bdt_nak') and not out.get('fdt_nak'):
+            out['err'] = f'No answer from {host}. Check the address, and that it is a BBMD on port {port or 47808}.'
+        return out
 
     # ------------------------------------------------------------------ misc --
     @staticmethod

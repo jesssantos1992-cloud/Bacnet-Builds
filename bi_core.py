@@ -724,6 +724,24 @@ def bbmd_findings(P, tEnd, name_of):
     return out
 
 
+def mif_limited(t):
+    """The busiest master on an MS/TP trunk when it looks capped by Max Info Frames: (master, frames per hold) or None.
+    Capped means: it holds the token often (50+ times), carries a good share of the trunk's messages (25%+), and sends
+    exactly the same number on most holds (60%+) while never sending more - a queue meeting a limit, not a quiet device."""
+    tot = sum(x['data'] for x in t['masters'])
+    best = None
+    for m in t['masters']:
+        fp = m.get('fph') or []
+        if len(fp) < 50 or not tot or m['data'] / tot < .25:
+            continue
+        cap = max(fp)
+        if not 1 <= cap <= 4 or sum(1 for f in fp if f == cap) / len(fp) < .6:
+            continue
+        if best is None or m['data'] > best[0]['data']:
+            best = (m, cap)
+    return best
+
+
 def override_findings(pts, name_of):
     """Points still held by a manual or higher priority (1 to 8) when the capture ended."""
     L = [(e, h) for e in pts or [] for h in e.get('held') or [] if h[0] <= 8]
@@ -1785,7 +1803,8 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             q = mtI.get(r.ifc)
             if q is None:
                 q = mtI[r.ifc] = {'ifc': r.ifc, 'm': {}, 'tin': {}, 'hold': {}, 'rot': {}, 'lastTo': {}, 'tokIn': {},
-                                  'pfmMax': 0, 'pfmTo': {}, 'rpl': set(), 't0': r.t, 't1': r.t, 'n': 0}
+                                  'pfmMax': 0, 'pfmTo': {}, 'rpl': set(), 't0': r.t, 't1': r.t, 'n': 0,
+                                  'cnt': {}, 'fph': {}}       # data frames in the current token hold / per hold
             ty, sc, ds = r.mt
             e = q['m'].get(sc)
             if e is None:
@@ -1796,6 +1815,9 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
             q['t1'] = r.t
             if ty == 0:
                 e['tok'] += 1
+                if sc in q['cnt']:                          # the hold that just ended: how many frames it sent
+                    q['fph'].setdefault(sc, []).append(q['cnt'][sc])
+                q['cnt'][sc] = 0
                 q['tokIn'][ds] = q['tokIn'].get(ds, 0) + 1
                 if q['tin'].get(sc) is not None:
                     q['hold'].setdefault(sc, []).append(r.t - q['tin'][sc])
@@ -1814,6 +1836,8 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                 q['rpl'].add(sc)
             elif ty in (5, 6):
                 e['data'] += 1
+                if sc in q['cnt']:
+                    q['cnt'][sc] += 1
         if r.rb:
             rbN += 1
         if r.proto == 'MS/TP':
@@ -2260,9 +2284,10 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
         for m, e in q['m'].items():
             if e['tok'] > 0 or e['pfm'] > 0:
                 hd = q['hold'].get(m) or []
+                fp = q['fph'].get(m) or []
                 masters.append({'mac': m, 'tok': e['tok'], 'data': e['data'], 'pfm': e['pfm'],
                                 'hold': sum(hd) / len(hd) if hd else 0, 'holdMax': max(hd) if hd else 0,
-                                'rot': med(q['rot'].get(m)), 'n': e['n']})
+                                'rot': med(q['rot'].get(m)), 'n': e['n'], 'fph': fp})
                 st[m] = 'master'
             elif e['n']:
                 st[m] = 'slave'
@@ -2304,8 +2329,28 @@ def analyze(P, T0, local_net=None, own_ips=()) -> Analysis:
                                for m in sorted(t['masters'], key=lambda m: -m['hold'])[:4]],
                         'y': 'A device can only speak when it has the token, so a slow lap delays every message on the trunk. Values go stale and requests time out.',
                         'f': ['Look at the devices that hold the token longest (listed under Where): they send or wait for the most.',
+                              *[f"MAC {m['mac']} sends about {tofixed(sum(m['fph']) / len(m['fph']), 1)} messages every time it holds the "
+                                f"token (up to {max(m['fph'])}): lower its Max Info Frames (to 2–4) so the others get a turn sooner, "
+                                'unless it is the router that the front-end talks through.'
+                                for m in t['masters'] if len(m['fph']) >= 20 and sum(m['fph']) / len(m['fph']) > 8],
                               'Reduce traffic from front-ends and trend logs on this trunk.', 'Raise the baud rate if every device supports it.',
                               'Reduce the number of masters, or split the trunk.']})
+        busy = mif_limited(t)
+        if busy:
+            m, cap = busy
+            out.append({'s': 'NOTE', 't': f'MAC {m["mac"]} on the {nm} may be held back by its Max Info Frames',
+                        'q': f'mstp.src == {m["mac"]}',
+                        'w': f"MAC {m['mac']} sends {cap} message{'s' if cap != 1 else ''} nearly every time it gets the token, and "
+                             f"never more, while it carries {jsround(100 * m['data'] / max(1, sum(x['data'] for x in t['masters'])))}% "
+                             'of the trunk’s messages. It probably has more waiting and has to stop at its Max Info Frames limit.',
+                        'ev': [f"{len(m['fph'])} token holds: {sum(1 for f in m['fph'] if f == cap)} sent exactly {cap}, none sent more"],
+                        'y': 'Max Info Frames is how many messages a master may send each time it holds the token. A router or '
+                             'gateway that answers for many devices behind it needs a higher limit than a single controller, or its '
+                             'replies queue up and the front-end sees slow answers and time-outs.',
+                        'f': [f"If MAC {m['mac']} is a router, gateway or supervisory controller, raise its Max Info Frames "
+                              f"(for example to {min(20, max(cap * 4, 8))}).",
+                              'Leave ordinary controllers at 1–4 so the token keeps moving.',
+                              'Capture again and check the Response times tab: answers through this device should come back faster.']})
     out.rb, out.tf, out.pairs, out.covs, out.wr, out.trk, out.tEnd = rbN, tf, list(pairs.values()), list(covs.values()), wrs, trk, tEnd
     sp = spd(P)
     for o in sp['m']:

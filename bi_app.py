@@ -28,7 +28,7 @@ import bi_core as C
 import bi_explore as E
 import bi_points
 import bi_ui as U
-from bi_common import (AUTHOR, BRAND, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
+from bi_common import (AUTHOR, HighlightDelegate, Labels, colors, csv_text, csv_to_xlsx, doc, esc, html_table, is_dark,
                        label, semibold, stamp)
 from bi_store import Store
 
@@ -867,7 +867,9 @@ class MainWindow(QMainWindow):
         self.upd = None
         self.tray = None
         from bi_explore import Explorer
-        E.TEMP_PREF = store.get('bi_temp') or ''          # View > Temperature
+        E.TEMP_PREF = store.get('bi_temp') or ''          # View > Units
+        E.PRESS_PREF = store.get('bi_press') or ''
+        E.FLOW_PREF = store.get('bi_flow') or ''
         self.explorer = Explorer(BL.RELAY, store, notify=self._ex_notify)
         self._ex_pending = False
         self.views = {}
@@ -1075,7 +1077,7 @@ class MainWindow(QMainWindow):
         """Colours of the sidebar, search field and banners (again after a theme change)."""
         c = colors()
         self.sidew.setStyleSheet(
-            f"QFrame#sidew{{background:{c['side']};border-right:3px solid {BRAND}}}"
+            f"QFrame#sidew{{background:{c['side']};border-right:1px solid {c['hair']}}}"
             f"QFrame#sidew QLabel{{color:{c['sfg']}}}"
             'QListWidget{background:transparent;border:0;outline:0}'
             f"QListWidget::item{{border-radius:7px;padding:0px 6px;margin:0px 10px;color:{c['sfg']}}}"
@@ -1110,7 +1112,7 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         def act(menu, text, fn, sc=None, en=None):
-            a = QAction(text, self)
+            a = QAction(text.replace('&', '&&'), self)        # a plain "&" (not a keyboard-shortcut marker)
             if sc:
                 a.setShortcut(QKeySequence(sc))
                 a.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
@@ -1167,12 +1169,19 @@ class MainWindow(QMainWindow):
             act(m, t, lambda _=False, v=v: self.set_theme(v))
         m.addSeparator()
         self.m_temp = {}
-        for t, v in [('Temperature: as the device sends it', ''), ('Temperature: °F', 'F'), ('Temperature: °C', 'C')]:
-            a = QAction(t, self, checkable=True)
-            a.triggered.connect(lambda _=False, v=v: self.set_temp(v))
-            m.addAction(a)
-            self.m_temp[v] = a
-        m.aboutToShow.connect(lambda: [a.setChecked(v == E.TEMP_PREF) for v, a in self.m_temp.items()])
+        um = m.addMenu('Units')
+        for kind, opts in (('temp', [('Temperature: as the device sends it', ''), ('Temperature: °F', 'F'), ('Temperature: °C', 'C')]),
+                           ('press', [('Air pressure: as the device sends it', ''), ('Air pressure: inH₂O', 'inH2O'),
+                                      ('Air pressure: Pa', 'Pa')]),
+                           ('flow', [('Air flow: as the device sends it', ''), ('Air flow: cfm', 'cfm'), ('Air flow: L/s', 'L/s')])):
+            for t, v in opts:
+                a = QAction(t, self, checkable=True)
+                a.triggered.connect(lambda _=False, kind=kind, v=v: self.set_unit(kind, v))
+                um.addAction(a)
+                self.m_temp[(kind, v)] = a
+            um.addSeparator()
+        um.aboutToShow.connect(lambda: [a.setChecked(v == getattr(E, self.UNIT_KINDS[kind][1]))
+                                        for (kind, v), a in self.m_temp.items()])
         self.m_galaxy = QAction('Galactic cursor', self, checkable=True)
         self.m_galaxy.setChecked(self.store.get('bi_galaxy', True))
         self.m_galaxy.toggled.connect(self.set_galaxy)
@@ -1193,6 +1202,10 @@ class MainWindow(QMainWindow):
         act(m, 'Site health audit…', lambda: self.site_audit(), None, lambda: not self.explorer.busy)
         act(m, 'Check device clocks…', lambda: self.site_audit(True), None,
             lambda: not self.explorer.busy)
+        act(m, 'Review overrides…', lambda: __import__('bi_sitewin').overrides_dialog(self), None,
+            lambda: not self.explorer.busy)
+        act(m, 'Find point (Who-Has)…', lambda: __import__('bi_sitewin').who_has_dialog(self))
+        act(m, 'BBMD tables…', lambda: __import__('bi_sitewin').bbmd_dialog(self))
         m.addSeparator()
         act(m, 'Find all devices (Who-Is)', lambda: self.send_msg('whois'))
         act(m, 'Find routers (Who-Is-Router)', lambda: self.send_msg('whoisrouter'))
@@ -2407,14 +2420,22 @@ class MainWindow(QMainWindow):
 
     def set_temp(self, v):
         """Show temperatures read from devices in °F, °C or as each device sends them."""
-        self.store.set('bi_temp', v)
-        E.TEMP_PREF = v
+        self.set_unit('temp', v)
+
+    UNIT_KINDS = {'temp': ('bi_temp', 'TEMP_PREF', 'Temperatures'), 'press': ('bi_press', 'PRESS_PREF', 'Air pressures'),
+                  'flow': ('bi_flow', 'FLOW_PREF', 'Air flows')}
+
+    def set_unit(self, kind, v):
+        """Show temperatures, air pressures or air flows read from devices in one unit, or as each device sends them."""
+        key, attr, what = self.UNIT_KINDS[kind]
+        self.store.set(key, v)
+        setattr(E, attr, v)
         if 'x' in self.views:
             self.views['x'].refresh()
         w = getattr(self, '_watch', None)
         if w is not None:
             w.retemp()
-        self.toast('Temperatures: ' + {'F': '°F', 'C': '°C'}.get(v, 'as each device sends them'))
+        self.toast(f'{what}: ' + (E.UNIT_LABEL.get(v) or 'as each device sends them'))
 
     def set_theme(self, v):
         self.store.set('bi_theme', v)
@@ -2482,7 +2503,7 @@ class MainWindow(QMainWindow):
                 if en is not None and not en():
                     continue
                 sc = a.shortcut().toString()
-                items.append(('cmd', a.text().replace('&', '').rstrip('…'), mt + (f' · {sc}' if sc else ''), a.trigger, 'Command'))
+                items.append(('cmd', a.text().replace('&&', '\0').replace('&', '').replace('\0', '&').rstrip('…'), mt + (f' · {sc}' if sc else ''), a.trigger, 'Command'))
         dv = self.view('x')
         for d in dv.sd_devs():
             items.append(('d', 'Device ' + dv.dev_label(d), d['ip'] or dv.grp_name(dv.grp(d)),

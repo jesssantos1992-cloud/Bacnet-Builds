@@ -153,7 +153,8 @@ pump(0.3)
 r = s.res
 check(r['pv'] == 'active' and r['default'] == 'inactive', f"schedule values in words: {r['pv']}, {r['default']}")
 check(r['week'][0] == [('07:00', 'active'), ('18:00', 'inactive')] and r['week'][5] == [], 'weekly schedule')
-check(r['exc'] == [{'when': '2026-12-25', 'tv': [('00:00', 'inactive')], 'pri': 10}], f"exception: {r['exc']}")
+check([{k: v for k, v in e.items() if k != 'raw'} for e in r['exc']] == [{'when': '2026-12-25', 'tv': [('00:00', 'inactive')], 'pri': 10}]
+      and all(e['raw'] for e in r['exc']), f"exception: {r['exc']}")
 check(s.days.item(0, 1).text() == '07:00 active · 18:00 inactive' and s.days.item(6, 1).text() == 'no changes', 'day table')
 shot(s, 'schedule')
 s.close()
@@ -201,7 +202,7 @@ w.grab().save(os.path.join(OUT, 'discover-device.png'))
 dv.go_node({'k': dev['key'], 't': 13})
 until(lambda: dv.live_tbl and dv.live_tbl[0].item(0, 4).text() != 'reading the states…' and dv.live_tbl[0].item(0, 2).text(), 30)
 check(dv.live_tbl[0].item(0, 4).text() == 'no state names' and dv.live_tbl[0].item(0, 2).text() == '1',
-      'a multi-state point without state text says so')
+      f'a multi-state point without state text says so ({dv.live_tbl[0].item(0, 4).text()!r}, {dv.live_tbl[0].item(0, 2).text()!r})')
 
 # temperatures in the unit chosen in View
 import bi_discover  # noqa: E402

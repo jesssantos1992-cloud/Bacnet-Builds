@@ -1,3 +1,15 @@
-- Discover: choose the network adapter for BACnet/IP. Automatic uses a connected Ethernet cable first, then Wi-Fi, so a laptop on both no longer sends its Who-Is out of the wrong one. Broadcasts go to the adapter's real subnet.
-- Updates: when an update fails, the message says why (proxy, blocked download, antivirus, administrator needed) and offers the download page. Every attempt is logged.
-- Discover on MS/TP: no more flickering or jumping back to the top while joined to a trunk (the token traffic no longer redraws the page), and scroll positions are kept when the page does update.
+- Discover History: your last discovers (you choose how many) are kept, with the points you read. Look back, reopen one, or see what changed since the previous discover or compared with now (new or missing devices, firmware, names, points).
+- Review overrides: one list of every active command on the site (start with priority 8, the ones left behind). Pick rows and release them all at once before handover.
+- Priority array: all 16 levels on a point, the one in control highlighted, and a Release button on each active level.
+- Out of service: one button to take a point out of service or put it back. The four status flags show as badges at the top of each point.
+- Device clocks: Sync clock on a device, or Set wrong clocks from the clock check and the site audit (local time or UTC). Each clock is read back afterwards.
+- Device commands: warm or cold restart, and switch a device's communication off (for a set time) or back on, with its password.
+- Find point (Who-Has): ask the network which device has a point, by name or by object.
+- BBMD tables: read the broadcast and foreign device tables of your BBMDs and check that every BBMD lists every other one.
+- Schedules and calendars can now be changed: edit the week, add or remove holidays and special days, and write them to the device.
+- Watch window: Instant updates (COV) instead of polling, with automatic fallback for devices that refuse.
+- Units: air pressure (inH₂O or Pa) and air flow (cfm or L/s), next to temperature, in View > Units.
+- Check-out sheet: a printable point-by-point commissioning sheet with Expected, OK, Checked by, Date and Notes columns.
+- MS/TP: a new finding when a busy router or controller seems held back by its Max Info Frames, and advice to lower it on masters that hog the token.
+- Every change (writes, releases, out of service, schedules, clocks, restarts) needs write access, goes to one device at a time, asks first and is recorded in the write log.
+- The line between the sidebar and the page is now a thin divider.

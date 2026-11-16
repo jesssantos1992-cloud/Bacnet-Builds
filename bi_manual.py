@@ -623,7 +623,8 @@ current value from the device (read-only).</p>
 """)
 
 ch('sitetools', 'Site health audit, trends, schedules and clocks', 'Discover', """
-<p>These read straight from the devices found in Discover. They only read: nothing is changed.</p>
+<p>These read straight from the devices found in Discover. Reading changes nothing; fixing what they find (setting
+clocks, releasing overrides, changing a schedule) is in Field tools and needs write access.</p>
 <h3>Site health audit</h3>
 <p>Capture &gt; <b>Site health audit…</b> reads every point of every device and lists the ones <b>in fault</b> (with the
 reason, such as no sensor), <b>in alarm</b>, <b>out of service</b> (the value is not coming from the field), <b>overridden</b>
@@ -649,7 +650,7 @@ graphs the one you pick. It reads with Read Property, so it works on every devic
 while you test a sequence or tune a loop; <b>Export…</b> saves every reading.</p>
 """)
 
-ch('write', 'Writing values (write access)', 'Discover', """
+ch('write', 'Writing values (write access)', 'Discover', f"""
 <p>Writing changes real equipment, so it is switched off until you turn it on – and it switches itself off again.</p>
 <h3>Turning write access on</h3>
 <ol>
@@ -671,9 +672,78 @@ control, the dialog tells you which one is overriding your write.</li>
 <p>To remove your command, tick <b>Release</b> and write at the same priority (this writes NULL). Always release
 temporary overrides when you have finished.</p>
 <h3>Write log</h3>
-<p>Every write is recorded: time, device, point, value, priority, result and read-back. The log is shown on the device
+<h3>The priority array</h3>
+<p>A point's <b>Details</b> tab lists all 16 priorities with what each is for. The one in control is highlighted, and
+each active level has a <b>Release</b> button that removes that command (it writes NULL at that priority). The point
+then follows the next active priority, or its relinquish default.</p>
+<h3>Out of service</h3>
+<p>The four status flags (in alarm, fault, overridden, out of service) show as badges at the top of a point. Inputs,
+outputs, values and schedules have a <b>Take out of service</b> / <b>Put back in service</b> button. Out of service, an
+input stops following its sensor so you can write a test value; put it back when you are done (the site health audit
+lists any that were left out).</p>
+<h3>Write log</h3>
+<p>Every change is recorded: time, device, point, value, priority, result and read-back – writes, releases, out of
+service, schedule and calendar changes, clock sets, restarts and communication control. The log is shown on the device
 and category pages, can be exported as Excel or CSV, and is also saved to <i>writes.log</i> next to the app's settings.</p>
-<p>Only the present value can be written. Restarts, configuration changes and other services are never sent.</p>
+<p>Configuration changes, creating or deleting objects and other services are never sent. See
+{go('fieldtools', 'Field tools')} for the other changes write access allows.</p>
+""")
+
+ch('fieldtools', 'Field tools: overrides, clocks, restarts, Who-Has, BBMDs', 'Discover', """
+<p>These work on the devices found in Discover. Reading changes nothing; anything that changes a device asks for write
+access, confirms first, and goes in the write log.</p>
+<h3>Review overrides (release them all at handover)</h3>
+<p>Capture &gt; <b>Review overrides…</b> (or <b>Review overrides…</b> in the site health audit) reads the priority array of
+every output and value on the site and lists each active command. Start with <b>Priority 8 – manual operator</b>, the
+ones technicians leave behind, or choose priorities 1–8, every command, or only the ones in control. Pick rows (Ctrl or
+Shift for several, Ctrl+A for all) and press <b>Release</b>. Each result shows in the list; <b>Export…</b> saves it as a
+record of what was released.</p>
+<h3>Set device clocks</h3>
+<p>Press <b>Sync clock…</b> on a device's page, or <b>Set wrong clocks…</b> in Check device clocks or the site health audit,
+to set the clocks to this PC's time. Choose <b>local time</b> (most controllers) or <b>UTC</b> (devices that keep their
+own UTC offset and daylight saving). Each clock is read back so you can see it took. Check this PC's own clock and time
+zone first.</p>
+<h3>Restart a device, or switch its communication off</h3>
+<p><b>Device commands</b> on a device's page: <b>Restart (warm start)</b> restarts the program and keeps settings;
+<b>cold start</b> starts from scratch and loses unsaved values – use warm unless the manufacturer says otherwise.
+<b>Disable communication</b> silences a device that is flooding the network (it keeps controlling its equipment) for 5
+minutes, 15 minutes, an hour or until you enable it again; choose <b>Disable initiation</b> to keep it answering but stop
+it sending on its own. Type the device password if it has one.</p>
+<h3>Find point (Who-Has)</h3>
+<p><b>Find point…</b> on the Discover bar (or Capture &gt; Find point) asks every device which one has a point. Type its
+exact object name (“AHU-1 SAT”) or an object (“AI 3”, “analog-value 12”), optionally limited to a range of device IDs.
+Double-click an answer to open it in Discover.</p>
+<h3>BBMD tables</h3>
+<p>Capture &gt; <b>BBMD tables…</b> reads the broadcast distribution table (BDT) and foreign device table (FDT) of one or
+more BBMDs (type their addresses separated by commas). With several, it checks that every BBMD lists every other one
+with the same mask – the usual reason a Who-Is from one subnet never reaches another – and warns about
+directed-broadcast masks.</p>
+<h3>Changing schedules and calendars</h3>
+<p>In <b>Show schedule…</b> press <b>Change schedule…</b>. Each day becomes a line of changes such as
+<code>07:00 active, 18:00 inactive</code> (24-hour times; values as the schedule uses them, or <code>relinquish</code>).
+<b>Copy Monday to Tuesday–Friday</b> saves typing. <b>Add exception…</b> adds a holiday or special day (one date or a
+range, its changes and a priority); <b>Remove selected</b> deletes exceptions. Nothing is sent until <b>Write to
+device…</b>; then the schedule is read back. Exceptions you did not touch are sent back exactly as they were.</p>
+<p>A calendar object has <b>Show calendar…</b>: add dates or date ranges, remove them, and <b>Write to device…</b>.
+Every schedule that uses the calendar follows the new dates.</p>
+<h3>Instant updates (COV)</h3>
+<p>In the watch window, tick <b>Instant updates (COV)</b>: each device is asked to send the value whenever it changes,
+instead of being read every few seconds. The <b>Updates</b> column shows which points use COV and which device refused
+(those are still read every few seconds). Subscriptions last five minutes, are renewed while the window is open and are
+cancelled when you close it. A point that never updates with COV often has its COV increment set too high.</p>
+<h3>History: your last discovers</h3>
+<p>Discover starts with an empty list each time, but every discover – the devices that answered and the points you
+read – is kept on this computer. Open the <b>History</b> tab on the Discover bar to see them, newest first. Pick one to
+see its devices (double-click a device for its points as they were), or choose <b>Changes since the discover before
+it</b> or <b>Changes compared with the Devices tab now</b> to list devices that are new or missing, new firmware, names,
+addresses, and points added, removed or renamed (tick <b>Include point value changes</b> to list values too).
+<b>Open in Discover</b> puts that discover's devices back in the Devices tab, marked as from History until they answer
+again. <b>Keep the last … discovers</b> sets how many are kept (older ones are deleted; 0 switches History off), and
+<b>Delete</b> removes the ones you pick. A new scan or Clear list starts a new entry.</p>
+<h3>Check-out sheet</h3>
+<p><b>Export points… &gt; Commissioning sheet</b> on a device page (or Save As in Discover for every device) saves a
+printable page: one row per point with the value read now, and empty <b>Expected</b>, <b>OK</b>, <b>Checked by</b>,
+<b>Date</b> and <b>Notes</b> columns plus sign-off lines – for point-to-point check-out and handover.</p>
 """)
 
 ch('sites', 'Site profiles', 'Everyday tools', """
@@ -737,11 +807,12 @@ words: “sat sp” finds “SAT Setpoint”.</p>
 ch('settings', 'Appearance, tips and the tour', 'Everyday tools', f"""
 <h3>Light and dark</h3>
 <p>View &gt; Theme: <b>automatic</b> follows Windows, or choose <b>light</b> or <b>dark</b>.</p>
-<h3>Temperatures in °F or °C</h3>
-<p>View &gt; <b>Temperature</b>: show temperatures read from devices <b>as each device sends them</b>, always in
-<b>°F</b>, or always in <b>°C</b>. It applies in Discover (values, limits, the priority array), the live watch and trend
-logs. When you write a temperature, type it in the unit shown: it is converted to the device's own unit before it is
-sent, and the confirmation shows both. Captures and exports keep the device's own units.</p>
+<h3>Units: temperature, air pressure, air flow</h3>
+<p>View &gt; <b>Units</b>: show values read from devices <b>as each device sends them</b>, or always in one unit –
+temperatures in <b>°F</b> or <b>°C</b>, air pressures in <b>inH₂O</b> or <b>Pa</b>, air flows in <b>cfm</b> or
+<b>L/s</b>. It applies in Discover (values, limits, the priority array), the live watch, trend logs and the override
+list. When you write a value, type it in the unit shown: it is converted to the device's own unit before it is sent,
+and the confirmation shows both. Captures and exports keep the device's own units.</p>
 <h3>Galactic cursor</h3>
 <p>Inside the app the mouse pointer is a small galaxy: a nebula-filled arrow with stars and a bright star at the tip
 (the tip is exactly where you click). Text boxes still show the normal text cursor and dividers their resize arrows.
@@ -893,9 +964,14 @@ ch('safety', 'Privacy and safety', 'Reference', """
 uploaded. The only internet access is the daily check for updates (which can be turned off).</li>
 <li><b>Looking is passive.</b> Opening captures, analysing them and live capture never send anything to the BACnet
 network. MS/TP live capture only listens.</li>
-<li><b>Discover only asks.</b> It sends Who-Is and read requests – the same questions every front-end asks all day.</li>
-<li><b>Writing is guarded.</b> Write access is off until you turn it on for a limited time, shows a red bar while on,
-needs a confirmation for each write, writes only present-value, reads the value back and logs every write.</li>
+<li><b>Discover only asks.</b> It sends Who-Is, Who-Has and read requests – the same questions every front-end asks all
+day. Instant updates (COV) in the watch window always expire on their own within an hour and are cancelled when you
+close the window.</li>
+<li><b>Changing devices is guarded.</b> Write access is off until you turn it on for a limited time and shows a red bar
+while on. Each change goes to one device (never broadcast) and needs a confirmation. Only these can be sent: a point's
+value (or releasing it), out of service, a schedule's week and exceptions, a calendar's dates, setting a clock, a warm or
+cold restart, and switching communication off or on. Everything else – creating or deleting objects, changing
+configuration, files – is refused before it leaves the PC. Every change is logged.</li>
 <li><b>Joining an MS/TP trunk</b> makes the PC a token-passing master. It listens first, picks an unused address,
 and stops if it detects that its address is already in use.</li>
 </ul>

@@ -733,17 +733,26 @@ def send_request(body):
 
 # ---------------------------------------------------------------------------------------------
 # Network scan relay for the "Explorer" tab.
-# The page builds BACnet requests; this relay only carries them. It is deliberately READ-ONLY:
-# every packet is parsed here and refused unless it is Who-Is, Who-Has, ReadProperty,
-# ReadPropertyMultiple, ReadRange, GetAlarmSummary, GetEventInformation, Segment-ACK,
-# Who-Is-Router-To-Network or What-Is-Network-Number.
-# The ONLY thing that can change a device is WriteProperty of present-value (with optional
-# priority, or NULL to relinquish) to ONE device by unicast, and only while write access has
-# been switched on by the user (it switches itself off after a few minutes). Every write is
-# appended to writes.log. Restarts, communication control, object create/delete, COV and all
-# other services can never leave this program this way.
+# The page builds BACnet requests; this relay only carries them. Every packet is parsed here and
+# refused unless it is one of:
+#   always:  Who-Is, Who-Has, ReadProperty, ReadPropertyMultiple, ReadRange, GetAlarmSummary,
+#            GetEventInformation, Segment-ACK, Who-Is-Router-To-Network, What-Is-Network-Number,
+#            Read-BDT / Read-FDT, Register-Foreign-Device, and SubscribeCOV for a limited time
+#            (at most an hour, unconfirmed notifications) or to cancel a subscription.
+#   only while write access has been switched on by the user (it switches itself off after a
+#   few minutes), and only to ONE device by unicast, never broadcast:
+#            WriteProperty of present-value (optional priority, or NULL to relinquish),
+#            out-of-service, weekly-schedule, exception-schedule or a calendar's date-list;
+#            ReinitializeDevice (warm / cold start); DeviceCommunicationControl; and
+#            TimeSynchronization / UTCTimeSynchronization.
+# Everything in the second group is appended to writes.log. Object create/delete, file writes,
+# WritePropertyMultiple and all other services can never leave this program this way.
 # Destinations must be private, link-local or broadcast addresses.
 # ---------------------------------------------------------------------------------------------
+WRITABLE_PROPS = (85, 81, 123, 38, 23)       # present-value, out-of-service, weekly / exception schedule, date-list
+CHANGE_SERVICES = (15, 20, 17)               # confirmed: WriteProperty, ReinitializeDevice, DeviceCommunicationControl
+TIME_SYNC = (6, 9)                           # unconfirmed: TimeSynchronization, UTCTimeSynchronization
+COV_MAX_LIFETIME = 3600
 def _read_only_ok(d: bytes, armed: bool = False) -> str:
     """Return "" when the BACnet/IP packet is a permitted request, else the reason."""
     if len(d) < 4 or d[0] != 0x81:
@@ -779,28 +788,126 @@ def _read_only_ok(d: bytes, armed: bool = False) -> str:
         return "" if d[i] in (0x00, 0x12) else "Network message not allowed."
     t = d[i] >> 4
     if t == 1:                                           # unconfirmed request
-        return "" if i + 1 < len(d) and d[i + 1] in (7, 8) else "Unconfirmed service not allowed."
+        if i + 1 < len(d) and d[i + 1] in (7, 8):        # Who-Has, Who-Is
+            return ""
+        if i + 1 < len(d) and d[i + 1] in TIME_SYNC:
+            return _time_sync_ok(d, i + 2, armed)
+        return "Unconfirmed service not allowed."
     if t == 0:                                           # confirmed request
         if d[i] & 0x08 or i + 3 >= len(d):
             return "Segmented requests are not allowed."
-        if d[i + 3] == 15:
+        sv = d[i + 3]
+        if sv == 15:
             return _write_ok(d, i + 4, armed)
+        if sv in (20, 17):
+            return _device_cmd_ok(d, i + 4, sv, armed)
+        if sv == 5:
+            return _cov_ok(d, i + 4)
         # 12/14/26 = Read Property / Read Property Multiple / Read Range; 3 / 29 = Get Alarm Summary /
         # Get Event Information (read-only alarm lists)
-        return "" if d[i + 3] in (12, 14, 26, 3, 29) else "Only reads and alarm lists are allowed."
+        return "" if sv in (12, 14, 26, 3, 29) else "Only reads, alarm lists and the guarded commands are allowed."
     if t == 4:                                           # segment ACK
         return ""
     return "Message type not allowed."
 
 
+def _ctx_len(d: bytes, k: int, n: int):
+    """(value start, length) of the primitive context tag `n` at d[k], or None."""
+    if k >= len(d) or d[k] >> 4 != n or not d[k] & 8 or d[k] & 7 in (6, 7):
+        return None
+    ln = d[k] & 7
+    if ln == 5:
+        if k + 1 >= len(d):
+            return None
+        return k + 2, d[k + 1]
+    return k + 1, ln
+
+
+def _time_sync_ok(d: bytes, k: int, armed: bool) -> str:
+    """(UTC)TimeSynchronization: exactly one date and one time, to one device, while write access is on."""
+    if d[1] != 0x0A:
+        return "Time synchronisation can only be sent to one device at a time, never broadcast."
+    if not armed:
+        return "Write access is switched off."
+    if len(d) - k != 10 or d[k] != 0xA4 or d[k + 5] != 0xB4:
+        return "Bad time synchronisation."
+    return ""
+
+
+def _device_cmd_ok(d: bytes, k: int, sv: int, armed: bool) -> str:
+    """ReinitializeDevice (warm or cold start only) or DeviceCommunicationControl, to one device, while write
+    access is on. The optional password is the only other thing allowed."""
+    if d[1] != 0x0A:
+        return "Device commands can only be sent to one device, never broadcast."
+    if not armed:
+        return "Write access is switched off."
+    if sv == 20:                                         # [0] reinitialized-state, [1] password
+        a = _ctx_len(d, k, 0)
+        if not a or a[1] != 1 or d[a[0]] not in (0, 1):
+            return "Only a warm or cold restart is allowed."
+        k = a[0] + 1
+        pw = 1
+    else:                                                # [0] time duration, [1] enable-disable, [2] password
+        a = _ctx_len(d, k, 0)
+        if a:
+            if not 1 <= a[1] <= 2:
+                return "Bad duration."
+            k = a[0] + a[1]
+        a = _ctx_len(d, k, 1)
+        if not a or a[1] != 1 or d[a[0]] not in (0, 1, 2):
+            return "Bad enable / disable."
+        k = a[0] + 1
+        pw = 2
+    if k < len(d):
+        a = _ctx_len(d, k, pw)
+        if not a or a[1] > 21 or a[0] + a[1] != len(d):
+            return "Only a password may follow."
+    return ""
+
+
+def _cov_ok(d: bytes, k: int) -> str:
+    """SubscribeCOV to one device: unconfirmed notifications for at most COV_MAX_LIFETIME seconds, or a cancellation.
+    A subscription for ever (no lifetime) is refused, so nothing is left behind in a device."""
+    if d[1] != 0x0A:
+        return "COV subscriptions can only be sent to one device."
+    a = _ctx_len(d, k, 0)                                # subscriber process identifier
+    if not a or not 1 <= a[1] <= 4:
+        return "Bad subscription."
+    k = a[0] + a[1]
+    a = _ctx_len(d, k, 1)                                # monitored object
+    if not a or a[1] != 4:
+        return "Bad subscription."
+    k = a[0] + 4
+    if k == len(d):
+        return ""                                        # cancellation
+    a = _ctx_len(d, k, 2)                                # issue confirmed notifications: must be FALSE
+    if not a or a[1] != 1 or d[a[0]] != 0:
+        return "Only unconfirmed COV notifications are allowed."
+    k = a[0] + 1
+    a = _ctx_len(d, k, 3)
+    if not a or not 1 <= a[1] <= 2 or a[0] + a[1] != len(d):
+        return f"A COV subscription needs a lifetime of at most {COV_MAX_LIFETIME} seconds."
+    life = int.from_bytes(d[a[0]:a[0] + a[1]], "big")
+    if not 0 < life <= COV_MAX_LIFETIME:
+        return f"A COV subscription needs a lifetime of at most {COV_MAX_LIFETIME} seconds."
+    return ""
+
+
 def _write_ok(d: bytes, k: int, armed: bool) -> str:
-    """WriteProperty of present-value only: object id, property 85, one value, optional priority."""
+    """WriteProperty of present-value (optional priority), out-of-service, a schedule's weekly or exception schedule
+    or a calendar's date-list: object id, property, one value."""
     if d[1] != 0x0A:
         return "Writes can only be sent to one device, never broadcast."
     if not armed:
         return "Write access is switched off."
-    if k + 9 > len(d) or d[k] != 0x0C or d[k + 5] != 0x19 or d[k + 6] != 85:
-        return "Only the present-value property can be written."
+    if k + 9 > len(d) or d[k] != 0x0C or d[k + 5] != 0x19 or d[k + 6] not in WRITABLE_PROPS:
+        return "Only present-value, out-of-service, schedules and calendars can be written."
+    prop = d[k + 6]
+    otype = int.from_bytes(d[k + 1:k + 5], "big") >> 22
+    if prop in (123, 38) and otype != 17 or prop == 23 and otype != 6:
+        return "Schedules can only be written to schedule objects, date lists only to calendars."
+    if prop == 81 and (k + 10 > len(d) or d[k + 8] not in (0x10, 0x11) or d[k + 9] != 0x3F):
+        return "Out-of-service takes true or false."
     k += 7
     if d[k] != 0x3E:
         return "Array writes are not allowed."
@@ -829,12 +936,13 @@ def _write_ok(d: bytes, k: int, armed: bool) -> str:
     if depth or j > len(d):
         return "Bad value."
     rest = d[j:]
-    if rest and not (len(rest) == 2 and rest[0] == 0x49 and 1 <= rest[1] <= 16):
-        return "Only a priority (1-16) may follow the value."
+    if rest and not (prop == 85 and len(rest) == 2 and rest[0] == 0x49 and 1 <= rest[1] <= 16):
+        return "Only a priority (1-16) may follow a present-value."
     return ""
 
 
 def _is_write(d: bytes) -> bool:
+    """Does this packet change a device (a write, restart, communication control or clock set)? Those are logged."""
     try:
         i = 6
         c = d[5]
@@ -844,7 +952,10 @@ def _is_write(d: bytes) -> bool:
             i += 3 + d[i + 2]
         if c & 0x20:
             i += 1
-        return not c & 0x80 and d[i] >> 4 == 0 and d[i + 3] == 15
+        if c & 0x80:
+            return False
+        t = d[i] >> 4
+        return t == 0 and d[i + 3] in CHANGE_SERVICES or t == 1 and d[i + 1] in TIME_SYNC
     except IndexError:
         return False
 
