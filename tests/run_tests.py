@@ -50,6 +50,7 @@ def main():
              ('fresh start and Discover Clear list', [py, 'fresh_test.py'], False),
              ('Discover network adapter (Ethernet before Wi-Fi)', [py, 'nic_test.py'], False),
              ('Discover network page and live values', [py, 'netpage_test.py'], False),
+             ('Discover on MS/TP: no flicker, scroll kept', [py, 'flicker_test.py'], False),
              ('sample capture, overrides, BBMD checks, EDE, map in reports', [py, 'sample_test.py'], False),
              ('site health audit, trend logs, schedules, clocks, live watch', [py, 'site_test.py'], False),
              ('light, dark and automatic theme on screen', [py, 'theme_test.py'], False),

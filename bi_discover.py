@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 import bi_core as C
 import bi_explore as E
 import bi_ui as U
-from bi_common import (Page, Pill, RowDelegate, Table, colors, csv_text, dev_name, doc, esc, heading, html_table, label,
+from bi_common import (Page, Pill, RowDelegate, Table, colors, csv_text, dev_name, doc, esc, heading, html_table, is_dark, label,
                        semibold, stamp)
 
 K_ROLE = Qt.ItemDataRole.UserRole
@@ -625,7 +625,43 @@ class DiscoverView(QWidget):
         if self.win.cur_view == 'x':
             self.refresh(soft=True)
 
-    def refresh(self, soft=False):
+    def _hold(self, sb, key):
+        """Keep a scroll position across a rebuild. Two rebuilds in a row keep the position from before the first
+        (the second one would otherwise read the 0 the first one left behind)."""
+        pend = self.__dict__.setdefault('_pend_y', {})
+        y = pend.setdefault(key, sb.value())
+
+        def restore():
+            sb.setValue(y)
+            pend.pop(key, None)
+        QTimer.singleShot(0, restore)
+
+    def _sig(self, AL):
+        """Everything the tree and the right side show. While it stays the same nothing is rebuilt, so the MS/TP token
+        traffic arriving in the Live capture tab (several analyses a second) no longer makes Discover flicker."""
+        import json
+        devs = []
+        for d in AL:
+            e = d['ex'] or {}
+            objs = e.get('objs') or []
+            al = e.get('alarms')
+            devs.append((d['key'], d['name'], d['vendor'], d['model'], d['ip'], d['net'], bool(d['cap']), e.get('st'),
+                         e.get('old'), e.get('pm'), e.get('stale'), e.get('stl'), len(objs), sum(1 for o in objs if o.get('ok')),
+                         hash(tuple(o['name'] for o in objs)), al and al.get('at'), e.get('alarms_busy')))
+        n = self.node or {}
+        row = None
+        if n.get('o') is not None:
+            en = self.entry(n.get('k')) if n.get('k') else None
+            o = next((x for x in ((en or {}).get('ex') or {}).get('objs') or [] if x['o'] == n['o']), None)
+            if o:
+                row = (o.get('name'), o.get('desc'), bool(o.get('pd')), o.get('pdl'), o.get('pl') is not None, o.get('pll'),
+                       tuple(o.get('states') or ()), 'states' in o, o.get('uc'))
+        pk = self.pk and (self.pk.get('src'), tuple(sorted(self.pk['sel'])), repr(self.pk.get('run')))
+        return repr((devs, sorted(n.items()), row, pk, self.tq, sorted(self.gopen), sorted(self.open), sorted(self.vis),
+                     self.ex.mode, self.ex.busy, self.ex.armed(), self.ex.scan_at, repr(self.nrun), self.nres, self.live,
+                     is_dark(), E.TEMP_PREF, len(self.ex.wlog), json.dumps(self.win.store.labels(), sort_keys=True)))
+
+    def refresh(self, soft=False, force=False):
         self._stale = False
         armed = self.ex.armed()
         self.armpill.setVisible(armed)
@@ -648,6 +684,10 @@ class DiscoverView(QWidget):
             self.status.setText(self.ex.msg)
         else:
             self.status.setText(self.status_text(D))
+        sig = self._sig(AL)
+        if sig == getattr(self, '_last_sig', None) and not force:
+            return                                       # nothing on screen would change: do not rebuild (no flicker)
+        self._last_sig = sig
         if show_left:
             self.build_tree(AL, D)
         self.build_right(D, AL)
@@ -682,7 +722,7 @@ class DiscoverView(QWidget):
     def build_tree(self, AL, D):
         self._building = True
         tr = self.tree
-        y = tr.verticalScrollBar().value()
+        self._hold(tr.verticalScrollBar(), 'tree')
         tr.setUpdatesEnabled(False)
         tr.clear()
         q = self.tq.lower()
@@ -768,7 +808,6 @@ class DiscoverView(QWidget):
         if cur is not None:
             tr.setCurrentItem(cur)
         tr.setUpdatesEnabled(True)
-        QTimer.singleShot(0, lambda: tr.verticalScrollBar().setValue(y))
         self._building = False
 
     def _exp(self, it, on):
@@ -823,7 +862,7 @@ class DiscoverView(QWidget):
             AL = self.all_devs()
             D = [d for d in AL if d['ex'] or d['key'] in self.vis]
         p = self.right
-        y = p.scroll.verticalScrollBar().value()
+        self._hold(p.scroll.verticalScrollBar(), 'right')
         p.setUpdatesEnabled(False)
         p.clear()
         n = self.node
@@ -848,7 +887,6 @@ class DiscoverView(QWidget):
                 self.device_page(p, en, e)
         p.end()
         p.setUpdatesEnabled(True)
-        QTimer.singleShot(0, lambda: p.scroll.verticalScrollBar().setValue(y))
 
     def go_node(self, n):
         prev = self.node
@@ -862,13 +900,12 @@ class DiscoverView(QWidget):
     def show_inspector(self, en, e, row):
         self.insp_t.setText(row['name'] or f"{E.sd_ty(row['ty'])} {row['inst']}")
         ip = self.insp_page
-        y = ip.scroll.verticalScrollBar().value()
+        self._hold(ip.scroll.verticalScrollBar(), 'insp')
         ip.setUpdatesEnabled(False)
         ip.clear()
         self.point_page(ip, en, e, row)
         ip.end()
         ip.setUpdatesEnabled(True)
-        QTimer.singleShot(0, lambda: ip.scroll.verticalScrollBar().setValue(y))
         if not self.insp.isVisible() or self._insp_anim == 'closing':
             self.insp.setStyleSheet(f"QFrame#insp{{background:{colors()['card']};border-left:1px solid {colors()['hair']}}}")
             self.insp.show()
