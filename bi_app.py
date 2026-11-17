@@ -807,18 +807,18 @@ def side_icon(k):
 
 
 SIDE = [(None, None), ('p', 'Packets'), ('Analyze', None), ('f', 'Findings'), ('d', 'Devices'), ('w', 'Changes'),
-        ('h', 'Point history'), ('e', 'Alarms & events'), ('t', 'Traffic'), ('s', 'Response times & errors'),
+        ('e', 'Alarms & events'), ('s', 'Response times & errors'),
         ('o', 'Online board'), ('Network', None),
-        ('g', 'Network map'), ('a', 'Available IDs'), ('n', 'Available networks'), ('MS/TP', None),
+        ('g', 'Network map'), ('a', 'Available IDs'), ('n', 'Available networks'), ('k', 'BBMD tables'), ('MS/TP', None),
         ('m', 'MS/TP trunk'), ('b', 'Bus speed'), ('Tools', None), ('c', 'Compare captures')]
 VNAME = {'p': 'packets', 'f': 'findings', 'd': 'devices', 'a': 'available-ids', 'n': 'available-networks',
          's': 'response-times', 'c': 'compare', 'b': 'bus-speed', 'o': 'online', 'w': 'changes', 't': 'traffic',
          'm': 'mstp-trunk', 'g': 'network-map', 'x': 'explorer', 'r': 'report', 'h': 'point-history', 'e': 'alarms',
-         'site': 'site-report'}
+         'site': 'site-report', 'k': 'bbmd-tables'}
 VTITLE = {'p': 'Packets', 'f': 'Findings', 'd': 'Devices', 'a': 'Available IDs', 'n': 'Available networks',
           's': 'Response times & errors', 'c': 'Compare captures', 'b': 'Bus speed', 'o': 'Online board', 'w': 'Changes',
           't': 'Traffic', 'm': 'MS/TP trunk', 'g': 'Network map', 'x': 'Discover', 'h': 'Point history',
-          'e': 'Alarms & events'}
+          'e': 'Alarms & events', 'k': 'BBMD tables'}
 
 
 # ============================================================ main window --
@@ -1153,7 +1153,7 @@ class MainWindow(QMainWindow):
         m = mb.addMenu('&View')
         for t, k in [('Packets', 'p'), ('Findings', 'f'), ('Devices', 'd'), ('Online board', 'o'),
                      ('Discover (find and browse devices)', 'x'), ('Changes (writes and commands)', 'w'),
-                     ('Traffic', 't'), ('MS/TP trunk', 'm'), ('Network map', 'g')]:
+                     ('MS/TP trunk', 'm'), ('Network map', 'g')]:
             a = QAction(t, self)
             a.setShortcut(QKeySequence({'p': 'Ctrl+1', 'f': 'Ctrl+2', 'd': 'Ctrl+3', 'o': 'Ctrl+4', 'x': 'Ctrl+5',
                                         'w': 'Ctrl+6', 't': 'Ctrl+7', 'm': 'Ctrl+8', 'g': 'Ctrl+9'}[k]))
@@ -1161,8 +1161,9 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _=False, k=k: self.goto(k))
             m.addAction(a)
         m.addSeparator()
-        for t, k in [('Point history', 'h'), ('Alarms & events', 'e'), ('Response times & errors', 's'),
-                     ('Available IDs', 'a'), ('Available networks', 'n'), ('Bus speed', 'b'), ('Compare captures', 'c')]:
+        for t, k in [('Alarms & events', 'e'), ('Response times & errors', 's'),
+                     ('Available IDs', 'a'), ('Available networks', 'n'), ('BBMD tables', 'k'), ('Bus speed', 'b'),
+                     ('Compare captures', 'c')]:
             act(m, t, lambda _=False, k=k: self.goto(k))
         m.addSeparator()
         for t, v in [('Theme: automatic', ''), ('Theme: light', 'light'), ('Theme: dark', 'dark')]:
@@ -1205,7 +1206,11 @@ class MainWindow(QMainWindow):
         act(m, 'Review overrides…', lambda: __import__('bi_sitewin').overrides_dialog(self), None,
             lambda: not self.explorer.busy)
         act(m, 'Find point (Who-Has)…', lambda: __import__('bi_sitewin').who_has_dialog(self))
-        act(m, 'BBMD tables…', lambda: __import__('bi_sitewin').bbmd_dialog(self))
+        act(m, 'BBMD tables', lambda: self.goto('k'))
+        m.addSeparator()
+        a = act(m, 'Traffic', lambda: self.goto('t'), 'Ctrl+7')
+        a.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)    # handled by the window shortcuts
+        act(m, 'Point history', lambda: self.goto('h'))
         m.addSeparator()
         act(m, 'Find all devices (Who-Is)', lambda: self.send_msg('whois'))
         act(m, 'Find routers (Who-Is-Router)', lambda: self.send_msg('whoisrouter'))
@@ -1275,7 +1280,12 @@ class MainWindow(QMainWindow):
             self.show_view('x')
             return
         it = self.side_items.get(k)
-        if it is None:
+        if it is None:                          # a view kept off the sidebar (Capture > Traffic, Point history)
+            self.side.blockSignals(True)
+            self.side.setCurrentItem(None)
+            self.side.clearSelection()
+            self.side.blockSignals(False)
+            self.show_view(k)
             return
         if self.side.currentItem() is it:       # e.g. coming back from Discover
             self.show_view(k)

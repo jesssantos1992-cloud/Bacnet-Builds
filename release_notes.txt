@@ -1,4 +1,2 @@
-- Discover History now looks and works like the Devices tab: the same tree (network, device, category, point) and the same pages, showing the discover you pick at the top. Compare it with the one before or with now, open it in Discover, export or delete it.
-- When a new discover is saved while you are looking at the newest, History moves to it.
-- Discover: the point list no longer has an extra unlabelled column ("commandable – double-click to open").
-- Menus: "Names & labels", "Alarms & events" and "Response times & errors" show their & again.
+- BBMD tables now has its own page in the sidebar, under Network. It reads each BBMD's broadcast and foreign device tables and checks that they agree, as before, but on a full page instead of a pop-up.
+- Traffic and Point history have moved from the sidebar to the Capture menu (Ctrl+7 still opens Traffic), leaving a shorter Analyze list.

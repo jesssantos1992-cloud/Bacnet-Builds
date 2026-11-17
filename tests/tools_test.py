@@ -408,7 +408,21 @@ stop.append(1)
 
 # ---------------------------------------------------------------- the menu --
 names = [a.text() for m in w.menuBar().actions() for a in m.menu().actions()]
-check(all(n in names for n in ('Review overrides…', 'Find point (Who-Has)…', 'BBMD tables…')), 'Capture menu entries')
+check(all(n in names for n in ('Review overrides…', 'Find point (Who-Has)…', 'BBMD tables', 'Traffic', 'Point history')),
+      'Capture menu entries')
+side =[k for k, t in bi_app.SIDE if t]
+check('t' not in side and 'h' not in side and side.index('k') == side.index('n') + 1,
+      f'sidebar: Traffic and Point history moved to Capture, BBMD tables under Network ({side})')
+was = w.cur_view
+w.goto('t')
+pump(0.3)
+check(w.cur_view == 't' and w.side.currentItem() is None, 'Traffic opens from the Capture menu with nothing picked in the sidebar')
+w.goto('k')
+pump(0.3)
+check(w.cur_view == 'k' and w.side.currentItem() is w.side_items['k'] and w.view('k').panel.q is not None,
+      'BBMD tables page in the sidebar')
+w.goto(was)
+pump(0.3)
 um = next(a.menu() for m in w.menuBar().actions() for a in m.menu().actions() if a.text() == 'Units')
 check(sum(1 for a in um.actions() if a.text()) == 9, 'Units menu: temperature, pressure and flow')
 w.set_unit('press', 'inH2O')

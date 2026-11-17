@@ -368,7 +368,7 @@ ch('history', 'Point history', 'Analyse a capture', """
 (for example <i>8 = active</i>: a manual override at priority 8). Show &gt; <b>Left overridden</b> lists only points held at
 priority 1 to 8, and Findings reports them too. Writing NULL at a priority releases it. Only writes seen in the capture
 count; Discover reads the device's real priority array.</p>
-<p><b>Point history</b> lists every point whose value appears in the capture, with how often it updated, how often it
+<p><b>Point history</b> (Capture &gt; Point history) lists every point whose value appears in the capture, with how often it updated, how often it
 changed, and its low, high and latest value. Pick a point to see its graph. Orange markers are writes: hover to see who
 wrote what, and double-click the graph or a row to see the packets. Hover over the graph to read the value at any
 time, drag across it to zoom in, and right-click to zoom out.</p>
@@ -386,7 +386,7 @@ may show as waiting. Double-click a row to see the packet.</p>
 """)
 
 ch('traffic', 'Traffic', 'Analyse a capture', f"""
-<p><b>Traffic</b> ({k('Ctrl+7')}) shows where the network load comes from:</p>
+<p><b>Traffic</b> (Capture &gt; Traffic, or {k('Ctrl+7')}) shows where the network load comes from:</p>
 <ul>
 <li><b>Busiest senders</b> – packets, share of all traffic, bytes, requests, broadcasts and COV notifications per
 device.</li>
@@ -714,7 +714,7 @@ it sending on its own. Type the device password if it has one.</p>
 exact object name (“AHU-1 SAT”) or an object (“AI 3”, “analog-value 12”), optionally limited to a range of device IDs.
 Double-click an answer to open it in Discover.</p>
 <h3>BBMD tables</h3>
-<p>Capture &gt; <b>BBMD tables…</b> reads the broadcast distribution table (BDT) and foreign device table (FDT) of one or
+<p><b>BBMD tables</b> (in the sidebar under Network, or Capture &gt; BBMD tables) reads the broadcast distribution table (BDT) and foreign device table (FDT) of one or
 more BBMDs (type their addresses separated by commas). With several, it checks that every BBMD lists every other one
 with the same mask – the usual reason a Who-Is from one subnet never reaches another – and warns about
 directed-broadcast masks.</p>

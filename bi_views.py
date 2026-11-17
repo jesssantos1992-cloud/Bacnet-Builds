@@ -2734,8 +2734,27 @@ HELP = {
               '<p>Everything stays on your computer.</p>')}
 
 
+class BbmdView(BaseView):
+    """Network > BBMD tables: read each BBMD's broadcast and foreign device tables (sends reads, needs no capture)."""
+    key, title = 'k', 'BBMD tables'
+
+    def __init__(self, win):
+        super().__init__(win)
+        from bi_sitewin import BbmdPanel
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 14, 18, 10)
+        v.addWidget(summary_row('BBMD tables', []))
+        self.panel = BbmdPanel(win)
+        v.addWidget(self.panel, 1)
+
+    def refresh(self):
+        p = self.panel
+        if not p.q.text().strip() and p.ex.opt.get('bbmd'):
+            p.q.setText(p.ex.opt['bbmd'])
+
+
 def make(k, win):
-    cls = {'f': FindingsView, 'd': DevicesView, 'w': ChangesView, 't': TrafficView, 's': ResponseView, 'o': OnlineView,
+    cls = {'k': BbmdView,'f': FindingsView, 'd': DevicesView, 'w': ChangesView, 't': TrafficView, 's': ResponseView, 'o': OnlineView,
            'g': MapView, 'a': AvailIdsView, 'n': AvailNetsView, 'm': MstpView, 'b': BusSpeedView, 'c': CompareView,
            'h': PointsView, 'e': AlarmsView}[k]
     return cls(win)

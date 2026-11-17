@@ -556,21 +556,20 @@ def C_tyname(t):
 
 # ============================================================ BBMD tables --
 def bbmd_dialog(win):
-    d = BbmdDialog(win)
-    d.show()
-    return d
+    """Capture > BBMD tables: opens the BBMD tables page (sidebar, under Network)."""
+    win.goto('k')
+    return win.view('k')
 
 
-class BbmdDialog(QDialog):
+class BbmdPanel(QWidget):
     """Read the broadcast distribution table (BDT) and foreign device table (FDT) of one or more BBMDs, and check
     that every BBMD lists every other one."""
 
     def __init__(self, win):
-        super().__init__(win)
+        super().__init__()
         self.win, self.ex = win, win.explorer
-        self.setWindowTitle('BBMD tables')
-        self.resize(900, 600)
         v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
         v.addWidget(hint('Type the address of each BBMD (comma-separated) and press Read. The broadcast distribution table '
                          '(BDT) says which other BBMDs it forwards broadcasts to; every BBMD should list every other one, '
                          'with the same masks. The foreign device table (FDT) lists PCs and devices registered with it. '
@@ -647,6 +646,19 @@ class BbmdDialog(QDialog):
         self.msg.setStyleSheet(f"color:{c['no'] if good else c['wa']}")
         self.bdt.fill([[r['ip'], e['ip'], e['port'], e['mask']] for r in res for e in (r['bdt'] or [])])
         self.fdt.fill([[r['ip'], e['ip'], e['port'], f"{e['ttl']} s", f"{e['left']} s"] for r in res for e in (r['fdt'] or [])])
+
+
+class BbmdDialog(QDialog):
+    """BBMD tables in a window of their own."""
+    check = staticmethod(BbmdPanel.check)
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.setWindowTitle('BBMD tables')
+        self.resize(900, 600)
+        v = QVBoxLayout(self)
+        self.panel = BbmdPanel(win)
+        v.addWidget(self.panel)
 
 
 # =============================================================== overrides --
