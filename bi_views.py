@@ -2751,6 +2751,15 @@ class BbmdView(BaseView):
         p = self.panel
         if not p.q.text().strip() and p.ex.opt.get('bbmd'):
             p.q.setText(p.ex.opt['bbmd'])
+        p.from_capture(self.win.P)                 # BBMDs seen in the open (or live) capture
+
+    def formats(self):
+        if not self.panel.res:
+            return []
+        head = ['BBMD', 'Table', 'Entry', 'Port', 'Mask / registered', 'Time left']
+        return PageView.savef(self, 'BBMD tables',
+                              lambda: html_table(head, [[esc(str(x)) for x in r] for r in self.panel.rows()]),
+                              lambda: csv_text(','.join(head), self.panel.rows()))
 
 
 def make(k, win):

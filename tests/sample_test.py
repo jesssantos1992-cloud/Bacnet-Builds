@@ -69,6 +69,29 @@ for f in F:
 w.set_filter('')
 pump(0.3)
 
+import bi_core as C  # noqa: E402
+seen = C.bbmds_seen(w.P)
+print('BBMDs seen:', seen)
+check(len(seen) >= 2 and any('forwards broadcasts' in e['why'] for e in seen.values()) and
+      any(e['fds'] for e in seen.values()), f'BBMDs found in the sample capture: {seen}')
+w.goto('k')
+pump(0.4)
+bp = w.view('k').panel
+check(all(a in bp.addrs() for a in seen), f'BBMD tables fills in the BBMDs from the capture: {bp.q.text()!r}')
+check(bp.tree.topLevelItemCount() == len(seen) and 'Seen in the capture' in bp.found.text(),
+      'BBMD tables lists each BBMD seen before reading')
+res = [{'ip': '10.0.1.5', 'bdt': [{'ip': '10.0.1.5', 'port': 47808, 'mask': '255.255.255.255'}],
+        'fdt': [{'ip': '10.9.9.9', 'port': 47808, 'ttl': 300, 'left': 200}], 'err': ''},
+       {'ip': '10.0.2.5', 'bdt': [{'ip': '10.0.2.5', 'port': 47808, 'mask': '255.255.255.255'},
+                                  {'ip': '10.0.1.5', 'port': 47808, 'mask': '255.255.255.255'}], 'fdt': [], 'err': ''}]
+bp.got(res)
+top = bp.tree.topLevelItem(0)
+kids = [top.child(0).child(i).text(0) + ' ' + top.child(0).child(i).text(3) for i in range(top.child(0).childCount())]
+check(top.text(0) == '10.0.1.5' and top.text(3) == '1 problem' and any('10.0.2.5' in k and 'Not listed' in k for k in kids)
+      and top.child(1).child(0).text(0) == '10.9.9.9' and bp.tree.topLevelItem(1).text(3) == '✓ OK',
+      f'BBMD tables: each BBMD, then what it lists and its foreign devices ({top.text(3)}, {kids})')
+check(any(x[2] == 'csv' for x in w.view('k').formats()), 'BBMD tables can be saved')
+
 w.goto('h')
 pump(0.4)
 v = w.view('h')

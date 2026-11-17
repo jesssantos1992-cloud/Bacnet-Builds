@@ -668,11 +668,39 @@ class Pk:
     len = 0
     d = b''
     tree = None
-    fl = bad = exp = mt = o = v = nak = dk = dn = sn = sa = key = adv = rb = nn = fd = fw = None
+    fl = bad = exp = mt = o = v = nak = dk = dn = sn = sa = key = adv = rb = nn = fd = fw = bv = None
     iam = whois = rq = rs = sig = wr = cov = rp = er = val = names = bm = note = wrx = ob = cv = al = None
 
 
 _PAD = b'\0' * 64
+
+
+BBMD_AT_SRC = {3: 'answered a BDT read', 4: 'forwards broadcasts', 7: 'answered an FDT read'}
+BBMD_AT_DST = {1: 'was sent a BDT', 2: 'was asked for its BDT', 5: 'takes foreign device registrations',
+               6: 'was asked for its FDT', 9: 'distributes broadcasts for foreign devices'}
+
+
+def bbmds_seen(P):
+    """BBMDs that show up in a capture: {'ip[:port]': {'why': [..], 'fds': [foreign devices], 'n': packets}},
+    from the BVLC messages only a BBMD sends or receives."""
+    out = {}
+    for r in P:
+        f = r.bv
+        if f is None or (f not in BBMD_AT_SRC and f not in BBMD_AT_DST):
+            continue
+        a = r.src if f in BBMD_AT_SRC else r.dst
+        if not a or ':' not in a:
+            continue
+        ip, port = a.rsplit(':', 1)
+        key = ip if port == '47808' else a
+        e = out.setdefault(key, {'why': [], 'fds': [], 'n': 0})
+        e['n'] += 1
+        why = BBMD_AT_SRC.get(f) or BBMD_AT_DST[f]
+        if why not in e['why']:
+            e['why'].append(why)
+        if f == 5 and r.src not in e['fds']:
+            e['fds'].append(r.src)
+    return out
 
 
 def bbmd_findings(P, tEnd, name_of):
@@ -1131,6 +1159,7 @@ def dis(t, lt, data, no, ifc=0, want_tree=False) -> Pk:
                 if d[b] == 0x81:
                     r.proto = 'BACnet/IP'
                     f = d[b + 1]
+                    r.bv = f
                     r.info = _BN.get(f) or 'BVLC 0x' + format(f, 'x')
                     r.exp = BX.get(f, '')
                     if tree is not None:

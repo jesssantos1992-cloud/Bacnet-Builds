@@ -718,6 +718,11 @@ Double-click an answer to open it in Discover.</p>
 more BBMDs (type their addresses separated by commas). With several, it checks that every BBMD lists every other one
 with the same mask – the usual reason a Who-Is from one subnet never reaches another – and warns about
 directed-broadcast masks.</p>
+<p>You rarely need to type the addresses: any BBMD the open or live capture shows (one forwarding broadcasts, taking
+foreign device registrations or answering table reads) is filled in, and listed with what it was seen doing. Nothing is
+sent until you press <b>Read</b>. The results are grouped by BBMD: under each one, the BBMDs it forwards broadcasts to
+(a red <i>Not listed</i> line is a BBMD that answered but is missing from this one's table) and the foreign devices
+registered with it, with the time each has left. File &gt; Save As saves the tables as a spreadsheet.</p>
 <h3>Changing schedules and calendars</h3>
 <p>In <b>Show schedule…</b> press <b>Change schedule…</b>. Each day becomes a line of changes such as
 <code>07:00 active, 18:00 inactive</code> (24-hour times; values as the schedule uses them, or <code>relinquish</code>).

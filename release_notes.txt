@@ -1,2 +1,3 @@
-- BBMD tables now has its own page in the sidebar, under Network. It reads each BBMD's broadcast and foreign device tables and checks that they agree, as before, but on a full page instead of a pop-up.
-- Traffic and Point history have moved from the sidebar to the Capture menu (Ctrl+7 still opens Traffic), leaving a shorter Analyze list.
+- BBMD tables fills in the BBMDs it sees in the open or live capture (those forwarding broadcasts, taking foreign device registrations or answering table reads), with what each was seen doing. Nothing is sent until you press Read.
+- BBMD tables results are grouped by BBMD: under each one, the BBMDs it forwards broadcasts to (with a red line for any BBMD missing from its table) and the foreign devices registered with it, with the time each has left.
+- BBMD tables can be saved as a spreadsheet or web page (File > Save As).

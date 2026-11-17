@@ -14,7 +14,8 @@ import time
 from PySide6.QtCore import QDate, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFormLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QTabWidget, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 import bi_explore as E
 import bi_site
@@ -563,40 +564,93 @@ def bbmd_dialog(win):
 
 class BbmdPanel(QWidget):
     """Read the broadcast distribution table (BDT) and foreign device table (FDT) of one or more BBMDs, and check
-    that every BBMD lists every other one."""
+    that every BBMD lists every other one. The addresses fill in from BBMDs seen in the capture (saved or live).
+    Results read as a tree: each BBMD, then the BBMDs it lists and the foreign devices registered with it."""
+    COLS = ['BBMD', 'Port', 'Mask / registration', 'Status']
 
     def __init__(self, win):
         super().__init__()
         self.win, self.ex = win, win.explorer
+        self.res = None
+        self.seen = {}
+        self._typed = False                      # the user typed their own addresses: stop filling them in
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addWidget(hint('Type the address of each BBMD (comma-separated) and press Read. The broadcast distribution table '
-                         '(BDT) says which other BBMDs it forwards broadcasts to; every BBMD should list every other one, '
-                         'with the same masks. The foreign device table (FDT) lists PCs and devices registered with it. '
-                         'Reading these changes nothing.'))
+        v.addWidget(hint('BBMDs seen in the capture (saved or live) are filled in for you; add any others, comma-separated, '
+                         'and press Read. Under each BBMD you see the other BBMDs it forwards broadcasts to (its BDT) – '
+                         'every BBMD should list every other one, with the same mask – and the PCs and devices registered '
+                         'with it as foreign devices (its FDT). Reading changes nothing.'))
         r = QHBoxLayout()
         self.q = QLineEdit(self.ex.opt.get('bbmd') or '')
         self.q.setPlaceholderText('10.0.1.5, 10.0.2.5, 10.0.3.5:47809')
         self.q.returnPressed.connect(self.go)
+        self.q.textEdited.connect(lambda _t: setattr(self, '_typed', True))
         r.addWidget(self.q, 1)
         self.b = U_primary(QPushButton('Read'))
         self.b.clicked.connect(self.go)
         r.addWidget(self.b)
         v.addLayout(r)
+        self.found = label('', muted=True)
+        v.addWidget(self.found)
         self.msg = label('', muted=False)
         v.addWidget(self.msg)
-        self.tabs = QTabWidget()
-        self.bdt = Table(['BBMD', 'Lists', 'Port', 'Mask'])
-        self.fdt = Table(['BBMD', 'Foreign device', 'Port', 'Registered for', 'Time left'])
-        self.tabs.addTab(self.bdt, 'Broadcast distribution (BDT)')
-        self.tabs.addTab(self.fdt, 'Foreign devices (FDT)')
-        v.addWidget(self.tabs, 1)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(self.COLS)
+        self.tree.setRootIsDecorated(True)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAlternatingRowColors(False)
+        hd = self.tree.header()
+        hd.setStretchLastSection(True)
+        for i, wd in enumerate((230, 70, 230)):
+            self.tree.setColumnWidth(i, wd)
+        v.addWidget(self.tree, 1)
 
+    # -------------------------------------------------------- from the capture --
+    def addrs(self):
+        return [a.strip() for a in self.q.text().replace(';', ',').split(',') if a.strip()]
+
+    def from_capture(self, P):
+        """Fill in BBMDs seen in packets P (Forwarded-NPDU senders, foreign device registrations, table reads)."""
+        import bi_core
+        self.seen = bi_core.bbmds_seen(P or [])
+        if self.seen:
+            self.found.setText('Seen in the capture: ' + ';  '.join(
+                f"{a} ({', '.join(e['why'])}" + (f", {len(e['fds'])} foreign device{'s' * (len(e['fds']) != 1)}" if e['fds'] else '')
+                + ')' for a, e in sorted(self.seen.items(), key=lambda x: _ipkey(x[0]))))
+        else:
+            self.found.setText('No BBMD traffic in the capture yet.' if P else
+                               'Open or start a capture and any BBMDs it sees are filled in here.')
+        if not self._typed:
+            have = self.addrs()
+            add = [a for a in sorted(self.seen, key=_ipkey) if a not in have]
+            if add:
+                self.q.setText(', '.join(have + add))
+        if self.res is None:
+            self.show_seen()
+
+    def show_seen(self):
+        """Before a read: the BBMDs from the capture, with the foreign devices seen registering."""
+        self.tree.clear()
+        c = colors()
+        for a in sorted(self.seen, key=_ipkey):
+            e = self.seen[a]
+            ip, port = (a.rsplit(':', 1) + ['47808'])[:2] if ':' in a else (a, '47808')
+            top = self._item(None, [ip, port, '', 'Seen in the capture – press Read for its tables'], c['mu'], bold=True)
+            if e['fds']:
+                g = self._item(top, [f"Foreign devices seen registering ({len(e['fds'])})", '', '', ''], bold=True, span=True)
+                for fd in e['fds']:
+                    fip, fp = fd.rsplit(':', 1)
+                    self._item(g, [fip, fp, '', ''])
+                g.setExpanded(True)
+            top.setExpanded(True)
+
+    # -------------------------------------------------------------- the read --
     def go(self):
-        addrs = [a.strip() for a in self.q.text().replace(';', ',').split(',') if a.strip()]
+        addrs = self.addrs()
         if not addrs:
             return
         self.b.setEnabled(False)
+        self.msg.setStyleSheet('')
         self.msg.setText('Reading…')
 
         def work():
@@ -607,45 +661,132 @@ class BbmdPanel(QWidget):
     def check(res):
         """Problems between the BBMDs read: [text]."""
         out = []
-        ok = [r for r in res if r['bdt'] is not None]
-        ips = {r['ip'] for r in ok}
         for r in res:
-            if r['err']:
-                out.append(f"{r['ip']}: {r['err']}")
-            elif r['bdt'] is None:
-                out.append(f"{r['ip']} would not give its broadcast table" + (' (refused – it may not be a BBMD)' if r.get('bdt_nak') else '.'))
-        for r in ok:
-            listed = {e['ip'] for e in r['bdt']}
-            if r['bdt'] and r['ip'] not in listed:
-                out.append(f"{r['ip']} does not list itself in its own table (most BBMDs must).")
-            for other in sorted(ips - {r['ip']} - listed):
-                out.append(f"{r['ip']} does not list {other}: broadcasts from its subnet will not reach {other}’s subnet.")
-            for e in r['bdt']:
-                if e['mask'] not in ('255.255.255.255',):
-                    out.append(f"{r['ip']} lists {e['ip']} with mask {e['mask']} (directed broadcast). That only works if the "
-                               'routers between them pass directed broadcasts; 255.255.255.255 (two-hop) is safer.')
+            out += BbmdPanel.problems(r, res)
         masks = {}
-        for r in ok:
-            for e in r['bdt']:
+        for r in res:
+            for e in r['bdt'] or []:
                 masks.setdefault(e['ip'], set()).add(e['mask'])
         for ip, m in masks.items():
             if len(m) > 1:
                 out.append(f"The BBMDs disagree about the mask for {ip} ({', '.join(sorted(m))}). Use the same entry everywhere.")
         return out
 
+    @staticmethod
+    def problems(r, res):
+        """Problems with one BBMD's own table, given everything read."""
+        if r['err']:
+            return [f"{r['ip']}: {r['err']}"]
+        if r['bdt'] is None:
+            return [f"{r['ip']} would not give its broadcast table" +
+                    (' (refused – it may not be a BBMD)' if r.get('bdt_nak') else '.')]
+        out = []
+        listed = {e['ip'] for e in r['bdt']}
+        if r['bdt'] and r['ip'] not in listed:
+            out.append(f"{r['ip']} does not list itself in its own table (most BBMDs must).")
+        for other in BbmdPanel.missing(r, res):
+            out.append(f"{r['ip']} does not list {other}: broadcasts from its subnet will not reach {other}’s subnet.")
+        for e in r['bdt']:
+            if e['mask'] != '255.255.255.255':
+                out.append(f"{r['ip']} lists {e['ip']} with mask {e['mask']} (directed broadcast). That only works if the "
+                           'routers between them pass directed broadcasts; 255.255.255.255 (two-hop) is safer.')
+        return out
+
+    @staticmethod
+    def missing(r, res):
+        """Other BBMDs that answered but are not in r's table."""
+        ips = {x['ip'] for x in res if x['bdt'] is not None}
+        return sorted(ips - {r['ip']} - {e['ip'] for e in r['bdt'] or []}, key=_ipkey)
+
     def got(self, res):
         self.b.setEnabled(True)
         if isinstance(res, Exception):
             self.msg.setText(f'Could not read: {res}')
             return
+        self.res = res
         c = colors()
         probs = self.check(res)
         good = not probs and all(r['bdt'] is not None for r in res)
         self.msg.setText(('✓ The tables agree: every BBMD lists every other one.' if len(res) > 1 else '✓ Read.') if good else
-                         '\n'.join('• ' + p for p in probs))
+                         f"{len(probs)} problem{'s' * (len(probs) != 1)} – see the BBMDs marked below.")
         self.msg.setStyleSheet(f"color:{c['no'] if good else c['wa']}")
-        self.bdt.fill([[r['ip'], e['ip'], e['port'], e['mask']] for r in res for e in (r['bdt'] or [])])
-        self.fdt.fill([[r['ip'], e['ip'], e['port'], f"{e['ttl']} s", f"{e['left']} s"] for r in res for e in (r['fdt'] or [])])
+        self.fill(res)
+
+    def fill(self, res):
+        c = colors()
+        self.tree.clear()
+        for r in res:
+            ip, port = (r['ip'].rsplit(':', 1) if ':' in r['ip'] else (r['ip'], '47808'))
+            probs = self.problems(r, res)
+            bdt, fdt = r['bdt'], r['fdt']
+            if r['err'] or bdt is None:
+                st, col = probs[0].split(': ', 1)[-1] if r['err'] else 'No broadcast table (may not be a BBMD)', c['se']
+            elif probs:
+                st, col = f"{len(probs)} problem{'s' * (len(probs) != 1)}", c['wa']
+            else:
+                st, col = '✓ OK', c['no']
+            summ = []
+            if bdt is not None:
+                summ.append(f"lists {len(bdt)} BBMD{'s' * (len(bdt) != 1)}")
+            if fdt is not None:
+                summ.append(f"{len(fdt)} foreign device{'s' * (len(fdt) != 1)}")
+            top = self._item(None, [ip, port, ', '.join(summ), st], col, bold=True, tip='\n'.join(probs))
+            if bdt is not None:
+                g = self._item(top, ['Forwards broadcasts to (BDT)', '', '', ''], bold=True, span=True)
+                for e in sorted(bdt, key=lambda e: _ipkey(e['ip'])):
+                    note = 'itself' if e['ip'] == r['ip'] else ''
+                    bad_mask = e['mask'] != '255.255.255.255'
+                    if bad_mask:
+                        note = (note + ' · ' if note else '') + 'directed broadcast – routers must pass it'
+                    self._item(g, [e['ip'], str(e['port']), e['mask'], note], c['wa'] if bad_mask else None)
+                for m in self.missing(r, res):
+                    self._item(g, [m, '', '', '✗ Not listed – its broadcasts will not reach this subnet'], c['se'])
+                if not bdt:
+                    self._item(g, ['(empty)', '', '', ''], c['mu'])
+                g.setExpanded(True)
+            if fdt is not None:
+                g = self._item(top, ['Foreign devices registered (FDT)', '', '', ''], bold=True, span=True)
+                for e in sorted(fdt, key=lambda e: _ipkey(e['ip'])):
+                    self._item(g, [e['ip'], str(e['port']), f"registered for {e['ttl']} s", f"{e['left']} s left"])
+                if not fdt:
+                    self._item(g, ['(none registered)', '', '', ''], c['mu'])
+                g.setExpanded(True)
+            top.setExpanded(True)
+
+    def _item(self, parent, cols, color=None, bold=False, tip='', span=False):
+        it = QTreeWidgetItem([str(x) for x in cols])
+        if color:
+            for i in range(len(cols)):
+                it.setForeground(i, QColor(color))
+        if bold:
+            f = it.font(0)
+            f.setBold(True)
+            it.setFont(0, f)
+        if tip:
+            for i in range(len(cols)):
+                it.setToolTip(i, tip)
+        (parent.addChild(it) if parent is not None else self.tree.addTopLevelItem(it))
+        if span:
+            it.setFirstColumnSpanned(True)          # a group heading reads across the row
+        return it
+
+    def rows(self):
+        """For export: one row per entry."""
+        out = []
+        for r in self.res or []:
+            for e in r['bdt'] or []:
+                out.append([r['ip'], 'BDT', e['ip'], e['port'], e['mask'], ''])
+            for e in r['fdt'] or []:
+                out.append([r['ip'], 'FDT', e['ip'], e['port'], f"{e['ttl']} s", f"{e['left']} s left"])
+        return out
+
+
+def _ipkey(a):
+    ip = a.split(':')[0]
+    try:
+        return tuple(int(x) for x in ip.split('.')), a
+    except ValueError:
+        return (999,), a
 
 
 class BbmdDialog(QDialog):
