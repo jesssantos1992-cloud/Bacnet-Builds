@@ -427,33 +427,66 @@ check(dv.t_hist.text() == 'History' and dv.t_dev.isChecked(), 'Devices / History
 dv.t_hist.setChecked(True)
 pump(0.5)
 hp = dv.history
-check(dv.stack.currentWidget() is hp and hp.list.rowCount() == 1 and hp.tbl.rowCount() == 2, 'History tab lists the discover and its devices')
-hp.activated(hp.tbl._data[0])
-pump(0.2)
-check(hp.tbl.rowCount() == len(d1['objs']) and hp.back_b.isVisibleTo(hp), 'double-click a device: its points')
+check(dv.stack.currentWidget() is hp and hp.pick.count() == 1 and len(hp.rows) == 2, 'History tab shows the discover and its devices')
+
+
+def tree_shape(tr):
+    """[(depth, text)] of every row, like the Devices tab tree."""
+    out = []
+
+    def walk(it, dep):
+        out.append((dep, it.text(0)))
+        for i in range(it.childCount()):
+            walk(it.child(i), dep + 1)
+    for i in range(tr.topLevelItemCount()):
+        walk(tr.topLevelItem(i), 0)
+    return out
+
+
+dv.show_tab('dev')
+dv.open.update({d1['key'], d5['key']} | {f"{d1['key']}|{t}" for t, _ in E.Explorer.cats(d1)})
+dv.gopen.add('nmstp')
+dv.refresh(force=True)
+pump(0.3)
+live_shape = tree_shape(dv.tree)
+dv.show_tab('hist')
+hp.go({'k': d1['key'], 'o': E.oid(2, 7)})                    # opens the same branches as in the Devices tab
+hp.open.add(d5['key'])
+hp.build_tree()
+pump(0.3)
+hist_shape = tree_shape(hp.tree)
+check(hist_shape[:len(live_shape)] == live_shape[:len(hist_shape)] and len(hist_shape) > 8,
+      f'the History tree is built like the Devices tree: {hist_shape[:6]} vs {live_shape[:6]}')
+check(hp.tree.currentItem() and hp.tree.currentItem().text(0) == 'SAT SP' and 'SAT SP' in hp.crumb.text(), 'a point opens from the tree')
 shot(w, 'history')
-d5['fw'] = '5.0'                                               # the device was upgraded since that discover
-hp.show_c.setCurrentIndex(2)
+it = next(hp.tree.topLevelItem(0).child(i) for i in range(hp.tree.topLevelItem(0).childCount())
+          if hp.tree.topLevelItem(0).child(i).data(0, Qt.ItemDataRole.UserRole)[1] == d1['key'])
+hp.tree.setCurrentItem(it)
 pump(0.2)
-rows = [[hp.tbl.item(i, j).text() for j in range(5)] for i in range(hp.tbl.rowCount())]
-check(['Changed', 'VAV-5 (2005)', 'Firmware', '4.1', '5.0'] in rows, f'compared with the Devices tab now: {rows}')
+check(hp.node == {'k': d1['key']} and any(b.text() == 'Technical details' for b in hp.right.findChildren(QToolButton)),
+      'a device page like Discover’s (with Technical details)')
+hp.tree.setCurrentItem(it.child(0))
+pump(0.2)
+check(hp.node.get('t') is not None and len(hp.rows) == sum(1 for o in d1['objs'] if o['ty'] == hp.node['t']), 'a category lists its points')
+d5['fw'] = '5.0'                                               # the device was upgraded since that discover
+hp.go({'chg': 2})
+pump(0.2)
+check(['Changed', 'VAV-5 (2005)', 'Firmware', '4.1', '5.0'] in hp.rows, f'compared with the Devices tab now: {hp.rows}')
 ex.new_history()                                              # a second discover, in which VAV-1 has a new name
 d1['name'] = 'VAV-1 east'
 ex.cache()
 until(lambda: len(H.index()) == 2, 10)
 pump(0.5)
-check(hp.list.rowCount() == 2, 'the new discover appears in the list straight away')
-hp.list.selectRow(0)
-hp.show_c.setCurrentIndex(1)
+check(hp.pick.count() == 2 and hp.pick.currentIndex() == 0, 'the new discover appears straight away')
+hp.go({'chg': 1})
 pump(0.2)
-rows = [[hp.tbl.item(i, j).text() for j in range(5)] for i in range(hp.tbl.rowCount())]
-check(['Changed', 'VAV-1 east (2001)', 'Name', 'VAV-1', 'VAV-1 east'] in rows, f'changes since the discover before: {rows}')
+check(['Changed', 'VAV-1 east (2001)', 'Name', 'VAV-1', 'VAV-1 east'] in hp.rows, f'changes since the discover before: {hp.rows}')
 check(len(H.diff([{'id': 9, 'ip': 'a'}], [{'id': 9, 'ip': 'b'}])) == 1 and H.diff([{'id': 9, 'ip': 'a'}], [{'id': 9, 'ip': 'b'}])[0][2] == 'Address',
       'a device that moved address is one change, not missing + new')
 check([x[0] for x in H.diff([{'id': 1, 'ip': 'a'}], [{'id': 2, 'ip': 'a'}])] == ['new', 'gone'], 'a new device and a missing one')
 hp.keep.setValue(1)
 pump(0.3)
-check(len(H.index()) == 1 and hp.list.rowCount() == 1 and w.store.get('bi_hist_keep') == 1, 'keeping fewer deletes the oldest')
+check(len(H.index()) == 1 and hp.pick.count() == 1 and w.store.get('bi_hist_keep') == 1, 'keeping fewer deletes the oldest')
 old = ex.clear()
 n = ex.open_history(H.load(H.index()[0]['id']))
 pump(0.5)
